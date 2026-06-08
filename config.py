@@ -29,16 +29,20 @@ SPIN_DURATION_SEC = 2.0     # how long flow must exceed threshold
 
 # Game phase durations (seconds)
 PHASE_DURATIONS = {
-    "IDLE": -1,           # wait for operator keypress
+    "IDLE": -1,             # wait for operator keypress
     "ANIMAL": 4,
-    "AREA": 10,
-    "FILL": 60,
-    "MIX": 20,
+    "FRUIT_SELECT": 15,     # stand in areas, fruits fall proportionally
+    "MIX": 15,              # everyone jumps to mix
     "RESULT": 6,
 }
 
-# Jumps needed to fully fill one area
-JUMPS_TO_FILL = 40
+# Total jumps (all areas combined) to reach mix_level=1.0
+JUMPS_TO_MIX = 50
+
+# Fruit particle visual settings
+FRUIT_SPAWN_RATE = 2.0      # fruits per second for a fully-occupied area
+FRUIT_PARTICLE_SPEED = 12   # fall speed in pixels per frame (at full resolution)
+FRUIT_PARTICLE_RADIUS = 28  # particle circle radius in pixels
 
 # AR overlay alpha (0.0 = invisible, 1.0 = opaque)
 FILL_OVERLAY_ALPHA = 0.5
