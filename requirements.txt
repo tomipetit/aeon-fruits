@@ -1,0 +1,5 @@
+cyndilib
+opencv-python
+numpy
+scipy
+Pillow
