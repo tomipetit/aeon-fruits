@@ -8,8 +8,7 @@ import config
 class GameState(Enum):
     IDLE = auto()
     ANIMAL = auto()
-    AREA = auto()
-    FILL = auto()
+    FRUIT_SELECT = auto()
     MIX = auto()
     RESULT = auto()
 
@@ -19,52 +18,50 @@ class JuiceGame:
         self.state = GameState.IDLE
         self._state_entered_at = time.monotonic()
 
-        self.fill_levels = [0.0] * config.NUM_AREAS   # 0.0 – 1.0 per area
-        self._fill_counters = [0] * config.NUM_AREAS   # raw jump counts
         self.area_fruits: list[dict] = [config.FRUITS[i % len(config.FRUITS)]
                                         for i in range(config.NUM_AREAS)]
+        self.fruit_proportions: list[float] = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
+        self.mix_level: float = 0.0
+        self._total_jumps: int = 0
+
+        # Accumulated area counts during FRUIT_SELECT (used to compute proportions)
+        self._area_accum: list[float] = [0.0] * config.NUM_AREAS
 
         self.animal: dict = config.ANIMALS[0]
-        self.match_score: float = 0.0           # 0.0 – 1.0
-        self.star_rating: int = 0               # 1 – 5
+        self.match_score: float = 0.0
+        self.star_rating: int = 0
 
         self._last_area_counts: list[int] = [0] * config.NUM_AREAS
 
     # ------------------------------------------------------------------ #
 
     def start(self):
-        """Operator keypress to begin a round from IDLE."""
         if self.state == GameState.IDLE:
             self._enter(GameState.ANIMAL)
 
     def update(self, area_counts: list[int], jump_counts: list[int], spinning: bool):
-        now = time.monotonic()
-        elapsed = now - self._state_entered_at
+        elapsed = time.monotonic() - self._state_entered_at
         self._last_area_counts = area_counts
 
         if self.state == GameState.IDLE:
-            pass  # wait for start()
+            pass
 
         elif self.state == GameState.ANIMAL:
             if elapsed >= config.PHASE_DURATIONS["ANIMAL"]:
-                self._enter(GameState.AREA)
+                self._enter(GameState.FRUIT_SELECT)
 
-        elif self.state == GameState.AREA:
-            if elapsed >= config.PHASE_DURATIONS["AREA"]:
-                self._assign_fruits(area_counts)
-                self._enter(GameState.FILL)
-
-        elif self.state == GameState.FILL:
-            for i, jumps in enumerate(jump_counts):
-                self._fill_counters[i] += jumps
-                self.fill_levels[i] = min(1.0, self._fill_counters[i] / config.JUMPS_TO_FILL)
-            all_full = all(lvl >= 1.0 for lvl in self.fill_levels)
-            timeout = elapsed >= config.PHASE_DURATIONS["FILL"]
-            if all_full or timeout:
+        elif self.state == GameState.FRUIT_SELECT:
+            for i, cnt in enumerate(area_counts):
+                self._area_accum[i] += cnt
+            if elapsed >= config.PHASE_DURATIONS["FRUIT_SELECT"]:
+                self._lock_fruit_proportions()
                 self._enter(GameState.MIX)
 
         elif self.state == GameState.MIX:
-            if spinning or elapsed >= config.PHASE_DURATIONS["MIX"]:
+            self._total_jumps += sum(jump_counts)
+            self.mix_level = min(1.0, self._total_jumps / config.JUMPS_TO_MIX)
+            done = self.mix_level >= 1.0 or elapsed >= config.PHASE_DURATIONS["MIX"]
+            if done:
                 self._calculate_score()
                 self._enter(GameState.RESULT)
 
@@ -77,30 +74,37 @@ class JuiceGame:
     def _enter(self, new_state: GameState):
         if new_state == GameState.ANIMAL:
             self.animal = random.choice(config.ANIMALS)
-            self.fill_levels = [0.0] * config.NUM_AREAS
-            self._fill_counters = [0] * config.NUM_AREAS
+            fruits = list(config.FRUITS)
+            random.shuffle(fruits)
+            for i in range(config.NUM_AREAS):
+                self.area_fruits[i] = fruits[i % len(fruits)]
+            self.fruit_proportions = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
+            self.mix_level = 0.0
+            self._total_jumps = 0
+            self._area_accum = [0.0] * config.NUM_AREAS
         self.state = new_state
         self._state_entered_at = time.monotonic()
 
-    def _assign_fruits(self, area_counts: list[int]):
-        fruits = list(config.FRUITS)
-        random.shuffle(fruits)
-        for i in range(config.NUM_AREAS):
-            self.area_fruits[i] = fruits[i % len(fruits)]
+    def _lock_fruit_proportions(self):
+        total = sum(self._area_accum)
+        if total > 0:
+            self.fruit_proportions = [v / total for v in self._area_accum]
+        else:
+            self.fruit_proportions = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
 
     def _calculate_score(self):
-        total = sum(self.fill_levels) or 1.0
-        actual = [lvl / total for lvl in self.fill_levels]
         ideal = self.animal["ideal_mix"]
-        diff = sum(abs(a - b) for a, b in zip(actual, ideal))
+        diff = sum(abs(a - b) for a, b in zip(self.fruit_proportions, ideal))
         self.match_score = max(0.0, 1.0 - diff / 2.0)
         self.star_rating = max(1, round(self.match_score * 5))
 
     def get_render_data(self) -> dict:
         return {
             "state": self.state,
-            "fill_levels": self.fill_levels[:],
             "area_fruits": self.area_fruits[:],
+            "fruit_proportions": self.fruit_proportions[:],
+            "mix_level": self.mix_level,
+            "total_jumps": self._total_jumps,
             "animal": self.animal,
             "match_score": self.match_score,
             "star_rating": self.star_rating,

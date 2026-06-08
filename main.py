@@ -83,6 +83,9 @@ def main():
             else:
                 bgr = cv2.resize(bgr, (config.WIDTH, config.HEIGHT))
 
+        # Mirror flip: project screen faces children, so flip horizontally
+        bgr = cv2.flip(bgr, 1)
+
         # -- Detection --
         detector.update(bgr)
         area_counts = detector.get_area_counts()
