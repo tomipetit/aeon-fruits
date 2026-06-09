@@ -3,6 +3,7 @@ import time
 from enum import Enum, auto
 
 import config
+import ai_comment
 
 
 class GameState(Enum):
@@ -18,25 +19,31 @@ class JuiceGame:
         self.state = GameState.IDLE
         self._state_entered_at = time.monotonic()
 
-        self.area_fruits: list[dict] = [config.FRUITS[i % len(config.FRUITS)]
-                                        for i in range(config.NUM_AREAS)]
+        self._animal_index: int = 0
+        self._session_animals: list[dict] = config.ANIMALS[:config.ANIMALS_PER_SESSION]
+        self.animal: dict = self._session_animals[0]
+
+        self.area_fruits: list[dict] = [
+            config.FRUITS[self.animal["fruits"][i]] for i in range(config.NUM_AREAS)
+        ]
         self.fruit_proportions: list[float] = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
         self.mix_level: float = 0.0
         self._total_jumps: int = 0
 
         # Accumulated area counts during FRUIT_SELECT (used to compute proportions)
         self._area_accum: list[float] = [0.0] * config.NUM_AREAS
-
-        self.animal: dict = config.ANIMALS[0]
         self.match_score: float = 0.0
         self.star_rating: int = 0
 
         self._last_area_counts: list[int] = [0] * config.NUM_AREAS
+        self.taste_comment: str = ""
 
     # ------------------------------------------------------------------ #
 
     def start(self):
         if self.state == GameState.IDLE:
+            self._session_animals = random.sample(config.ANIMALS, config.ANIMALS_PER_SESSION)
+            self._animal_index = 0
             self._enter(GameState.ANIMAL)
 
     def update(self, area_counts: list[int], jump_counts: list[int], spinning: bool):
@@ -67,21 +74,38 @@ class JuiceGame:
 
         elif self.state == GameState.RESULT:
             if elapsed >= config.PHASE_DURATIONS["RESULT"]:
-                self._enter(GameState.IDLE)
+                self._animal_index += 1
+                if self._animal_index < len(self._session_animals):
+                    self._enter(GameState.ANIMAL)
+                else:
+                    self._enter(GameState.IDLE)
 
     # ------------------------------------------------------------------ #
 
     def _enter(self, new_state: GameState):
         if new_state == GameState.ANIMAL:
-            self.animal = random.choice(config.ANIMALS)
-            fruits = list(config.FRUITS)
-            random.shuffle(fruits)
-            for i in range(config.NUM_AREAS):
-                self.area_fruits[i] = fruits[i % len(fruits)]
+            self.animal = self._session_animals[self._animal_index]
+            self.area_fruits = [
+                config.FRUITS[f] for f in self.animal["fruits"]
+            ]
             self.fruit_proportions = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
             self.mix_level = 0.0
             self._total_jumps = 0
             self._area_accum = [0.0] * config.NUM_AREAS
+            self.taste_comment = ""
+        elif new_state == GameState.MIX:
+            # スコアを事前計算してから MIX 中に API 呼び出しを開始
+            self._calculate_score()
+            self.taste_comment = "ジュースの味は..."
+            ai_comment.generate_taste_comment(
+                self.animal,
+                self.area_fruits,
+                self.fruit_proportions,
+                self.match_score,
+                lambda text: setattr(self, "taste_comment", text),
+            )
+        elif new_state == GameState.RESULT:
+            pass  # comment already generating since MIX started
         self.state = new_state
         self._state_entered_at = time.monotonic()
 
@@ -110,4 +134,5 @@ class JuiceGame:
             "star_rating": self.star_rating,
             "area_counts": self._last_area_counts[:],
             "elapsed": time.monotonic() - self._state_entered_at,
+            "taste_comment": self.taste_comment,
         }

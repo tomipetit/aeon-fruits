@@ -50,28 +50,85 @@ FILL_OVERLAY_ALPHA = 0.5
 # Area boundary dead zone (fraction of frame width on each side of boundary)
 AREA_DEAD_ZONE = 0.03
 
-# Fruit definitions: name, BGR color for overlay, ideal mix ratios per animal
-FRUITS = [
-    {"name": "オレンジ", "bgr": (0, 165, 255)},
-    {"name": "ぶどう",   "bgr": (128, 0, 128)},
-    {"name": "メロン",   "bgr": (0, 200, 100)},
-]
+# Fruit definitions (10 total): name → {name, bgr}
+FRUITS: dict[str, dict] = {
+    "いちご":             {"name": "いちご",             "bgr": (30,  30, 210)},
+    "メロン":             {"name": "メロン",             "bgr": (60, 200,  80)},
+    "かき":               {"name": "かき",               "bgr": (0,  100, 210)},
+    "きょほう":           {"name": "きょほう",           "bgr": (90,   0, 110)},
+    "シャインマスカット": {"name": "シャインマスカット", "bgr": (80, 210, 130)},
+    "みかん":             {"name": "みかん",             "bgr": (0,  140, 255)},
+    "ブルーベリー":       {"name": "ブルーベリー",       "bgr": (160,  50,  80)},
+    "いちじく":           {"name": "いちじく",           "bgr": (60,   30, 130)},
+    "もも":               {"name": "もも",               "bgr": (160, 180, 255)},
+    "なし":               {"name": "なし",               "bgr": (100, 220, 190)},
+}
 
-# Animals with juice preferences
+# Animals with juice preferences (10 total; ANIMALS_PER_SESSION are chosen each session).
+# fruits: exactly 3 fruit names (must exist in FRUITS) assigned to areas left→right.
+# ideal_mix: ideal proportion [area0, area1, area2] summing to 1.0.
 ANIMALS = [
     {
         "name": "うさぎ",
         "pref": "あまずっぱいのがすき！",
+        "fruits": ["いちご", "みかん", "もも"],
         "ideal_mix": [0.5, 0.2, 0.3],
     },
     {
         "name": "くま",
         "pref": "あまいのがすき！",
-        "ideal_mix": [0.6, 0.3, 0.1],
+        "fruits": ["もも", "メロン", "みかん"],
+        "ideal_mix": [0.4, 0.4, 0.2],
     },
     {
         "name": "きつね",
         "pref": "つぶつぶがすき！",
+        "fruits": ["きょほう", "シャインマスカット", "ブルーベリー"],
+        "ideal_mix": [0.4, 0.3, 0.3],
+    },
+    {
+        "name": "ぞう",
+        "pref": "みずみずしいのがすき！",
+        "fruits": ["メロン", "なし", "もも"],
+        "ideal_mix": [0.4, 0.3, 0.3],
+    },
+    {
+        "name": "パンダ",
+        "pref": "さっぱりしたのがすき！",
+        "fruits": ["メロン", "シャインマスカット", "なし"],
         "ideal_mix": [0.3, 0.4, 0.3],
     },
+    {
+        "name": "ライオン",
+        "pref": "こくてあまいのがすき！",
+        "fruits": ["かき", "みかん", "いちご"],
+        "ideal_mix": [0.5, 0.3, 0.2],
+    },
+    {
+        "name": "ねこ",
+        "pref": "ちょっとすっぱいのがすき！",
+        "fruits": ["いちご", "なし", "ブルーベリー"],
+        "ideal_mix": [0.5, 0.2, 0.3],
+    },
+    {
+        "name": "さる",
+        "pref": "フルーティなのがすき！",
+        "fruits": ["みかん", "いちご", "かき"],
+        "ideal_mix": [0.4, 0.3, 0.3],
+    },
+    {
+        "name": "ひつじ",
+        "pref": "やさしいあまさがすき！",
+        "fruits": ["もも", "いちご", "メロン"],
+        "ideal_mix": [0.5, 0.3, 0.2],
+    },
+    {
+        "name": "いぬ",
+        "pref": "げんきになるのがすき！",
+        "fruits": ["みかん", "きょほう", "いちじく"],
+        "ideal_mix": [0.4, 0.3, 0.3],
+    },
 ]
+
+# Number of animals chosen per session
+ANIMALS_PER_SESSION = 3
