@@ -3,3 +3,5 @@ opencv-python
 numpy
 scipy
 Pillow
+flask
+anthropic
