@@ -31,7 +31,7 @@ class _TrackedBlob:
 
 class MotionDetector:
     def __init__(self):
-        self._model = YOLO("yolov8n.pt")
+        self._model = YOLO(config.YOLO_MODEL)
         self._model.to("mps")
 
         self._scale = config.DETECTION_SCALE
@@ -61,7 +61,7 @@ class MotionDetector:
 
         small = cv2.resize(bgr_frame, (self._frame_w_scaled, self._frame_h_scaled))
 
-        # YOLOv8n person detection (class 0 = person)
+        # Face detection (class 0 = face)
         results = self._model(
             small,
             conf=config.YOLO_CONF_THRESHOLD,

@@ -8,6 +8,9 @@ import ai_comment
 
 class GameState(Enum):
     IDLE = auto()
+    INTRO1 = auto()
+    INTRO2 = auto()
+    INTRO3 = auto()
     ANIMAL = auto()
     FRUIT_SELECT = auto()
     MIX = auto()
@@ -44,6 +47,7 @@ class JuiceGame:
 
         self._last_area_counts: list[int] = [0] * config.NUM_AREAS
         self.taste_comment: str = ""
+        self._round: int = 0
 
     # ------------------------------------------------------------------ #
 
@@ -51,7 +55,11 @@ class JuiceGame:
         if self.state == GameState.IDLE:
             self._session_animals = random.sample(config.ANIMALS, config.ANIMALS_PER_SESSION)
             self._animal_index = 0
-            self._enter(GameState.ANIMAL)
+            if self._round == 0:
+                self._enter(GameState.INTRO1)
+            else:
+                self._enter(GameState.ANIMAL)
+            self._round += 1
 
     def update(self, area_counts: list[int], jump_counts: list[int], spinning: bool):
         elapsed = time.monotonic() - self._state_entered_at
@@ -59,6 +67,18 @@ class JuiceGame:
 
         if self.state == GameState.IDLE:
             pass
+
+        elif self.state == GameState.INTRO1:
+            if elapsed >= config.PHASE_DURATIONS["INTRO1"]:
+                self._enter(GameState.INTRO2)
+
+        elif self.state == GameState.INTRO2:
+            if elapsed >= config.PHASE_DURATIONS["INTRO2"]:
+                self._enter(GameState.INTRO3)
+
+        elif self.state == GameState.INTRO3:
+            if elapsed >= config.PHASE_DURATIONS["INTRO3"]:
+                self._enter(GameState.ANIMAL)
 
         elif self.state == GameState.ANIMAL:
             if elapsed >= config.PHASE_DURATIONS["ANIMAL"]:

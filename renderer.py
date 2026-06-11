@@ -23,7 +23,43 @@ def _ease_out_elastic(t: float) -> float:
     return 2.0 ** (-10.0 * t) * math.sin((t * 10.0 - 0.75) * (2.0 * math.pi / 3.0)) + 1.0
 
 
-# ---------- POUR background ----------
+# ---------- backgrounds ----------
+
+_bg_title: np.ndarray | None = None
+
+
+def _get_bg_title() -> np.ndarray:
+    global _bg_title
+    if _bg_title is None:
+        path = os.path.join(os.path.dirname(__file__), "assets", "title.png")
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        _bg_title = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+    return _bg_title
+
+
+_bg_shop: np.ndarray | None = None
+
+
+def _get_bg_shop() -> np.ndarray:
+    global _bg_shop
+    if _bg_shop is None:
+        path = os.path.join(os.path.dirname(__file__), "assets", "shop.png")
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        _bg_shop = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+    return _bg_shop
+
+
+_bg_order: np.ndarray | None = None
+
+
+def _get_bg_order() -> np.ndarray:
+    global _bg_order
+    if _bg_order is None:
+        path = os.path.join(os.path.dirname(__file__), "assets", "juice_stand_order.png")
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        _bg_order = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+    return _bg_order
+
 
 _bg_pour: np.ndarray | None = None
 
@@ -185,10 +221,17 @@ def _draw_ja_texts(frame: np.ndarray,
         draw.text((x, y), text, font=get_font(size), fill=rgb, anchor=anchor)
     frame[:] = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
+_INTRO1_TEXT = "森に新しくジュース屋さんができました。\n東三河で取れたおいしい果物を使ってジュースを作ってくれます。"
+_INTRO2_TEXT  = "好みを聞いて、あなたに合うジュースをつくりますよ！"
+_INTRO2_TEXT2 = "そこにいるみんなにはジュースづくりのお手伝いをしてもらおうかな！"
+
 _STATE_LABELS = {
     GameState.IDLE:         "READY  [SPACE to start]",
+    GameState.INTRO1:       "",
+    GameState.INTRO2:       "",
+    GameState.INTRO3:       "",
     GameState.ANIMAL:       "",
-    GameState.FRUIT_SELECT: "入れたいくだもののエリアに移動しよう！",
+    GameState.FRUIT_SELECT: "入れたいフルーツのエリアに移動しよう！",
     GameState.MIX:          "みんなでジャンプしてミキサーを回そう！",
     GameState.POUR:         "",
     GameState.RESULT:       "",
@@ -206,36 +249,45 @@ def _draw_area_dividers(frame: np.ndarray):
         cv2.line(frame, (x, 0), (x, config.HEIGHT), (200, 200, 200), 3)
 
 
+def _pixel_wrap(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
+    """Split text into lines so each line's pixel width fits within max_width."""
+    lines: list[str] = []
+    current = ""
+    for ch in text:
+        candidate = current + ch
+        w = draw.textbbox((0, 0), candidate, font=font)[2]
+        if w > max_width and current:
+            lines.append(current)
+            current = ch
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [text]
+
+
 def _draw_animal_bubble(
     frame: np.ndarray, data: dict, *, top_y: int | None = None,
-    text: str | None = None, font_size: int = 44
+    bottom_y: int | None = None, text: str | None = None, font_size: int = 44
 ) -> None:
-    """Rounded speech bubble centered horizontally.
-
-    text: override display text (defaults to animal pref).
-    top_y: align bubble top to this y; None places it just above the ANIMAL sprite.
-    font_size: PIL font size (default 44).
-    """
+    """Rounded speech bubble centered horizontally, max 90 % of screen width."""
     pref_text = text if text is not None else data["animal"]["pref"]
     font = _get_font_ja_bold(font_size)
 
+    pad_x, pad_y = 48, 28
+    max_bubble_w = int(config.WIDTH * 0.9)
+    max_text_w = max_bubble_w - pad_x * 2
+
     dummy_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines = _pixel_wrap(pref_text, font, max_text_w, dummy_draw)
 
-    # Auto-wrap if single line would be too wide
-    bbox1 = dummy_draw.textbbox((0, 0), pref_text, font=font)
-    if bbox1[2] - bbox1[0] > config.WIDTH - 120:
-        lines = _wrap_ja(pref_text, max_chars=20)
-    else:
-        lines = [pref_text]
-
-    line_bboxes = [dummy_draw.textbbox((0, 0), l, font=font) for l in lines]
+    line_bboxes = [dummy_draw.textbbox((0, 0), ln, font=font) for ln in lines]
     max_tw = max(bb[2] - bb[0] for bb in line_bboxes)
     line_h = max(bb[3] - bb[1] for bb in line_bboxes)
-    line_spacing = 8
+    line_spacing = 80
     total_text_h = line_h * len(lines) + line_spacing * (len(lines) - 1)
 
-    pad_x, pad_y = 48, 28
-    bw = max_tw + pad_x * 2
+    bw = min(max_tw + pad_x * 2, max_bubble_w)
     bh = total_text_h + pad_y * 2
     cx = config.WIDTH // 2
     bx1, bx2 = cx - bw // 2, cx + bw // 2
@@ -243,6 +295,9 @@ def _draw_animal_bubble(
     if top_y is not None:
         by1 = top_y
         by2 = by1 + bh
+    elif bottom_y is not None:
+        by2 = bottom_y
+        by1 = by2 - bh
     else:
         animal_top = _ANIMAL_COUNTER_TOP_Y - 500
         by2 = animal_top - 16
@@ -352,20 +407,16 @@ def _draw_countdown(frame: np.ndarray, elapsed: float) -> None:
 def _draw_mixer(frame: np.ndarray, data: dict):
     juice_color = _blended_juice_color(data)
     mix_level = data["mix_level"]
-    cx, cy, r = config.WIDTH // 2, config.HEIGHT // 2, 240
+    cx, cy, r = config.WIDTH // 2, config.HEIGHT // 2, 360
 
-    # Outer ring
+    # Background circle
     cv2.circle(frame, (cx, cy), r, (80, 80, 80), -1)
     cv2.circle(frame, (cx, cy), r, (255, 255, 255), 6)
 
-    # Juice fill (clip circle from bottom)
-    fill_h = int(2 * r * mix_level)
-    fill_y = cy + r - fill_h
-    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-    cv2.circle(mask, (cx, cy), r - 6, 255, -1)
-    juice = frame.copy()
-    cv2.rectangle(juice, (cx - r, fill_y), (cx + r, cy + r), juice_color, -1)
-    frame[mask > 0] = cv2.addWeighted(frame, 0.3, juice, 0.7, 0)[mask > 0]
+    # Juice circle expanding from center
+    juice_r = max(0, int(r * mix_level))
+    if juice_r > 0:
+        cv2.circle(frame, (cx, cy), juice_r, juice_color, -1)
 
     pct = int(mix_level * 100)
     cv2.putText(frame, f"{pct}%", (cx - 50, cy + 12),
@@ -408,7 +459,7 @@ def _draw_stars(frame: np.ndarray, data: dict):
     n_stars = 5
     total_w = n_stars * (star_size * 2 + 10)
     start_x = (config.WIDTH - total_w) // 2
-    y = config.HEIGHT // 2 + 160
+    y = _ANIMAL_COUNTER_TOP_Y + 55
 
     for i in range(n_stars):
         cx = start_x + i * (star_size * 2 + 10) + star_size
@@ -427,31 +478,43 @@ def _draw_stars(frame: np.ndarray, data: dict):
         if fill >= 1.0:
             # Full star
             cv2.fillPoly(frame, [pts_arr], (0, 215, 255))
-            cv2.polylines(frame, [pts_arr], True, (0, 165, 200), 2)
+            cv2.polylines(frame, [pts_arr], True, (255, 255, 255), 2)
         elif fill >= 0.5:
-            # Half star — fill left half using mask
+            # Half star — white base, gold left half
+            cv2.fillPoly(frame, [pts_arr], (255, 255, 255))
             mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             cv2.fillPoly(mask, [pts_arr], 255)
             mask[:, cx:] = 0
             frame[mask > 0] = (0, 215, 255)
-            cv2.polylines(frame, [pts_arr], True, (0, 165, 200), 2)
+            cv2.polylines(frame, [pts_arr], True, (255, 255, 255), 2)
         else:
-            # Empty star — outline only
-            cv2.polylines(frame, [pts_arr], True, (120, 120, 120), 2)
+            # Empty star — white fill with white outline
+            cv2.fillPoly(frame, [pts_arr], (255, 255, 255))
+            cv2.polylines(frame, [pts_arr], True, (255, 255, 255), 2)
 
     score_pct = int(data["match_score"] * 100)
-    cv2.putText(frame, f"MATCH {score_pct}%",
-                (config.WIDTH // 2 - 130, config.HEIGHT // 2 + 280),
-                _FONT_BOLD, 2.0, (255, 255, 255), 4, cv2.LINE_AA)
+    score_text = f"MATCH {score_pct}%"
+    (tw, _), _ = cv2.getTextSize(score_text, _FONT_BOLD, 2.0, 4)
+    tx = config.WIDTH // 2 - tw // 2
+    ty = _ANIMAL_COUNTER_TOP_Y + 155
+    cv2.putText(frame, score_text, (tx, ty), _FONT_BOLD, 2.0, (10, 45, 100), 12, cv2.LINE_AA)
+    cv2.putText(frame, score_text, (tx, ty), _FONT_BOLD, 2.0, (255, 255, 255),  4, cv2.LINE_AA)
 
 
 def _draw_hud(frame: np.ndarray, state: GameState):
     label = _STATE_LABELS.get(state, "")
     if not label:
         return
-    if state in (GameState.FRUIT_SELECT, GameState.MIX) and int(time.time() * 2) % 2 == 0:
+    if state in (GameState.IDLE, GameState.FRUIT_SELECT, GameState.MIX) and int(time.time() * 2) % 2 == 0:
         return
-    y = 160 if state == GameState.FRUIT_SELECT else 170
+    if state == GameState.IDLE:
+        y = config.HEIGHT - 60
+    elif state == GameState.FRUIT_SELECT:
+        y = 160
+    elif state == GameState.MIX:
+        y = 100
+    else:
+        y = 170
     _draw_ja_texts(frame, [(label, config.WIDTH // 2, y, 40, (255, 255, 255), "mm")], bold=True)
 
 
@@ -468,6 +531,9 @@ class ARRenderer:
         self._smooth_fill_levels: list[float] = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
         self._prev_state: GameState | None = None
         # Preload assets so first frame has no I/O latency
+        _get_bg_title()
+        _get_bg_shop()
+        _get_bg_order()
         _get_bg_pour()
         _get_flash()
         _get_fruit_sprites()
@@ -515,12 +581,36 @@ class ARRenderer:
         self._prev_state = state
 
         frame = bgr_frame.copy()
-        _draw_area_dividers(frame)
+        if state != GameState.MIX:
+            _draw_area_dividers(frame)
 
         ja_texts: list = []
 
         if state == GameState.IDLE:
-            pass
+            _draw_bg(frame, _get_bg_title())
+
+        elif state == GameState.INTRO1:
+            _draw_bg(frame, _get_bg_shop())
+            _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40, text=_INTRO1_TEXT, font_size=38)
+
+        elif state == GameState.INTRO2:
+            _draw_bg(frame, _get_bg_order())
+            intro2_text = _INTRO2_TEXT2 if data["elapsed"] >= 4.0 else _INTRO2_TEXT
+            _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40, text=intro2_text, font_size=38)
+
+        elif state == GameState.INTRO3:
+            # Semi-transparent black overlay
+            black = np.zeros_like(frame)
+            cv2.addWeighted(black, 0.75, frame, 0.25, 0, frame)
+            # Large "GAME START"
+            gs = "GAME START"
+            (tw, th), _ = cv2.getTextSize(gs, _FONT_BOLD, 6.0, 16)
+            tx, ty = config.WIDTH // 2 - tw // 2, config.HEIGHT // 2 - 40
+            cv2.putText(frame, gs, (tx, ty), _FONT_BOLD, 6.0, (0, 0, 0),     24, cv2.LINE_AA)
+            cv2.putText(frame, gs, (tx, ty), _FONT_BOLD, 6.0, (255, 255, 255), 16, cv2.LINE_AA)
+            # Japanese subtitle
+            ja_texts.append(("どうぶつの好みを聞いて、それに合った果物を選んでみよう",
+                             config.WIDTH // 2, config.HEIGHT // 2 + th + 20, 42, (255, 255, 255), "mm"))
 
         elif state == GameState.ANIMAL:
             _draw_bg(frame, _get_bg_pour())
@@ -529,7 +619,8 @@ class ARRenderer:
             _composite_sprite_bottom(
                 frame, sprites[sprite_idx], config.WIDTH // 2, _ANIMAL_COUNTER_TOP_Y, 500
             )
-            _draw_animal_bubble(frame, data)
+            if data["elapsed"] >= 1.0:
+                _draw_animal_bubble(frame, data)
 
         elif state == GameState.FRUIT_SELECT:
             # Update smooth radii toward target from live fruit_proportions

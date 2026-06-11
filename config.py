@@ -19,7 +19,8 @@ MOG2_VAR_THRESHOLD = 25
 # Minimum foreground blob area in pixels (at detection scale)
 MIN_PERSON_BLOB_AREA = 2000
 
-# YOLOv8 person detection confidence threshold
+# YOLOv8 face detection model and confidence threshold
+YOLO_MODEL = "yolov8n-face.pt"
 YOLO_CONF_THRESHOLD = 0.4
 
 # Jump detection
@@ -33,6 +34,9 @@ SPIN_DURATION_SEC = 2.0     # how long flow must exceed threshold
 # Game phase durations (seconds)
 PHASE_DURATIONS = {
     "IDLE": -1,             # wait for operator keypress
+    "INTRO1": 5,
+    "INTRO2": 8,
+    "INTRO3": 5,
     "ANIMAL": 4,
     "FRUIT_SELECT": 15,     # stand in areas, fruits fall proportionally
     "MIX": 15,              # everyone jumps to mix
