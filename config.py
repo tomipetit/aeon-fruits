@@ -36,11 +36,14 @@ PHASE_DURATIONS = {
     "ANIMAL": 4,
     "FRUIT_SELECT": 15,     # stand in areas, fruits fall proportionally
     "MIX": 15,              # everyone jumps to mix
+    "POUR": 5,              # glass reveal before result
     "RESULT": 12,
 }
 
 # Total jumps (all areas combined) to reach mix_level=1.0
 JUMPS_TO_MIX = 50
+
+DEMO_MIX_DURATION_SEC = 5  # seconds to auto-fill mix level in no-camera demo mode
 
 # Fruit particle visual settings
 FRUIT_SPAWN_RATE = 2.0      # fruits per second for a fully-occupied area
@@ -52,6 +55,34 @@ FILL_OVERLAY_ALPHA = 0.5
 
 # Area boundary dead zone (fraction of frame width on each side of boundary)
 AREA_DEAD_ZONE = 0.03
+
+# Sprite index in assets/animal_talk.png (10 cells, 280×230 each, left→right)
+ANIMAL_SPRITE_INDEX: dict[str, int] = {
+    "うさぎ":   0,
+    "さる":     1,
+    "きつね":   2,
+    "ぞう":     3,
+    "パンダ":   4,
+    "ライオン": 5,
+    "ねこ":     6,
+    "くま":     7,
+    "ひつじ":   8,
+    "いぬ":     9,
+}
+
+# Sprite index in assets/fruits.png (10 cells, 300×300 each, left→right)
+FRUIT_SPRITE_INDEX: dict[str, int] = {
+    "みかん":             0,
+    "かき":               1,
+    "きょほう":           2,
+    "シャインマスカット": 3,
+    "いちご":             4,
+    "メロン":             5,
+    "ブルーベリー":       6,
+    "もも":               7,
+    "いちじく":           8,
+    "なし":               9,
+}
 
 # Fruit definitions (10 total): name → {name, bgr}
 FRUITS: dict[str, dict] = {

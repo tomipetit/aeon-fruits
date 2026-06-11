@@ -4,6 +4,7 @@
 Usage:
     python main.py               # NDI interactive source selection
     python main.py --demo        # webcam demo (no NDI required)
+    python main.py --no-camera   # camera-less demo: z/x/c keys adjust area proportions
     python main.py --debug       # show detection overlay
 
 Keys during runtime:
@@ -36,18 +37,37 @@ from game_state import JuiceGame
 from renderer import ARRenderer
 
 
+def _shift_proportion(props: list[float], idx: int, step: float = 0.05) -> list[float]:
+    props = props[:]
+    props[idx] = min(1.0, props[idx] + step)
+    others_sum = sum(p for j, p in enumerate(props) if j != idx)
+    target_others = 1.0 - props[idx]
+    if others_sum > 0:
+        for j in range(len(props)):
+            if j != idx:
+                props[j] = props[j] / others_sum * target_others
+    return props
+
+
 def _make_blank_frame() -> np.ndarray:
     return np.zeros((config.HEIGHT, config.WIDTH, 3), dtype=np.uint8)
+
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--demo", action="store_true", help="use webcam instead of NDI")
+    parser.add_argument("--no-camera", action="store_true", help="camera-less demo: z/x/c keys adjust area proportions")
     parser.add_argument("--debug", action="store_true", help="show detection overlay")
     args = parser.parse_args()
 
     # ----- Input source -----
-    if args.demo:
+    if args.no_camera:
+        proportions = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
+        print("カメラなしデモモード: z/x/c キーで配合割合を調整できます")
+        cap = None
+        receiver = None
+    elif args.demo:
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.HEIGHT)
@@ -72,7 +92,10 @@ def main():
 
     # ----- Subsystems -----
     detector = MotionDetector()
-    game = JuiceGame()
+    if args.no_camera:
+        game = JuiceGame(demo_mode=True, demo_proportions=proportions)
+    else:
+        game = JuiceGame()
     renderer = ARRenderer()
     debug_on = args.debug
 
@@ -83,7 +106,9 @@ def main():
 
     while True:
         # -- Capture --
-        if receiver is not None:
+        if args.no_camera:
+            bgr = _make_blank_frame()
+        elif receiver is not None:
             bgr = receiver.get_frame()
             if bgr is None:
                 bgr = _make_blank_frame()
@@ -135,6 +160,11 @@ def main():
         elif key == ord("d"):
             debug_on = not debug_on
             print(f"デバッグ表示: {'ON' if debug_on else 'OFF'}")
+        elif args.no_camera and key in (ord("z"), ord("x"), ord("c")):
+            area_index = {ord("z"): 0, ord("x"): 1, ord("c"): 2}[key]
+            proportions = _shift_proportion(game.demo_proportions, area_index)
+            game.set_demo_proportions(proportions)
+            print(f"配合: {' | '.join(f'エリア{i+1}: {p*100:.0f}%' for i, p in enumerate(proportions))}")
 
     # -- Cleanup --
     cv2.destroyAllWindows()
