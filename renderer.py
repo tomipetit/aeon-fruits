@@ -254,6 +254,10 @@ def _pixel_wrap(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> l
     lines: list[str] = []
     current = ""
     for ch in text:
+        if ch == "\n":
+            lines.append(current)
+            current = ""
+            continue
         candidate = current + ch
         w = draw.textbbox((0, 0), candidate, font=font)[2]
         if w > max_width and current:
