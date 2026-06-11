@@ -1,8 +1,12 @@
 from collections import deque
+import os
 import time
+
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import cv2
 import numpy as np
+from ultralytics import YOLO
 
 import config
 
@@ -22,15 +26,14 @@ class _TrackedBlob:
         self._jump_state = "GROUND"   # GROUND | RISING | FALLING
         self._peak_y = cy
         self._last_jump_time = 0.0
+        self.bbox: tuple | None = None  # (x1, y1, x2, y2) in scaled coords
 
 
 class MotionDetector:
     def __init__(self):
-        self._bg = cv2.createBackgroundSubtractorMOG2(
-            history=config.MOG2_HISTORY,
-            varThreshold=config.MOG2_VAR_THRESHOLD,
-            detectShadows=False,
-        )
+        self._model = YOLO("yolov8n.pt")
+        self._model.to("mps")
+
         self._scale = config.DETECTION_SCALE
         self._area_w = int(config.WIDTH * self._scale / config.NUM_AREAS)
         self._frame_h_scaled = int(config.HEIGHT * self._scale)
@@ -57,33 +60,29 @@ class MotionDetector:
         self._frame_number += 1
 
         small = cv2.resize(bgr_frame, (self._frame_w_scaled, self._frame_h_scaled))
-        fg_mask = self._bg.apply(small)
 
-        # Clean up noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_DILATE, kernel)
+        # YOLOv8n person detection (class 0 = person)
+        results = self._model(
+            small,
+            conf=config.YOLO_CONF_THRESHOLD,
+            classes=[0],
+            verbose=False,
+        )
 
-        # Find contours
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        detections: list[tuple[float, float, int]] = []  # (cx, cy, area_index)
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < config.MIN_PERSON_BLOB_AREA:
-                continue
-            M = cv2.moments(cnt)
-            if M["m00"] == 0:
-                continue
-            cx = M["m10"] / M["m00"]
-            cy = M["m01"] / M["m00"]
-            area_index = self._area_for_cx(cx)
-            detections.append((cx, cy, area_index))
+        detections: list[tuple[float, float, int, tuple]] = []  # (cx, cy, area_index, bbox)
+        if results and results[0].boxes is not None:
+            for box in results[0].boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                cx = (x1 + x2) / 2
+                cy = (y1 + y2) / 2
+                area_index = self._area_for_cx(cx)
+                detections.append((cx, cy, area_index, (x1, y1, x2, y2)))
 
         # Nearest-neighbour tracking
         max_dist = self._frame_w_scaled / 8
         matched_blob_ids = set()
         new_blobs: list[_TrackedBlob] = []
-        for cx, cy, area_idx in detections:
+        for cx, cy, area_idx, bbox in detections:
             best: _TrackedBlob | None = None
             best_d = max_dist
             for blob in self._blobs:
@@ -96,6 +95,7 @@ class MotionDetector:
             if best is not None:
                 best.cx, best.cy = cx, cy
                 best.area_index = area_idx
+                best.bbox = bbox
                 best.y_history.append(cy)
                 best.last_seen_frame = self._frame_number
                 matched_blob_ids.add(best.blob_id)
@@ -103,6 +103,7 @@ class MotionDetector:
                 self._detect_jump(best)
             else:
                 b = _TrackedBlob(cx, cy, area_idx)
+                b.bbox = bbox
                 b.last_seen_frame = self._frame_number
                 new_blobs.append(b)
 
@@ -177,13 +178,23 @@ class MotionDetector:
         for i in range(1, config.NUM_AREAS):
             x = config.WIDTH * i // config.NUM_AREAS
             cv2.line(out, (x, 0), (x, config.HEIGHT), (255, 255, 0), 2)
-        # Blob centroids (scale back up)
+        # Blob bounding boxes (scale back up to full resolution)
         inv = 1.0 / self._scale
         for blob in self._blobs:
             if self._frame_number - blob.last_seen_frame <= 2:
-                cx = int(blob.cx * inv)
-                cy = int(blob.cy * inv)
-                cv2.circle(out, (cx, cy), 12, (0, 255, 0), -1)
-                cv2.putText(out, f"A{blob.area_index}", (cx + 14, cy + 6),
+                if blob.bbox is not None:
+                    x1, y1, x2, y2 = blob.bbox
+                    rx1 = int(x1 * inv)
+                    ry1 = int(y1 * inv)
+                    rx2 = int(x2 * inv)
+                    ry2 = int(y2 * inv)
+                    cv2.rectangle(out, (rx1, ry1), (rx2, ry2), (0, 255, 0), 2)
+                    cx = int(blob.cx * inv)
+                    cy = int(blob.cy * inv)
+                else:
+                    cx = int(blob.cx * inv)
+                    cy = int(blob.cy * inv)
+                    cv2.circle(out, (cx, cy), 12, (0, 255, 0), -1)
+                cv2.putText(out, f"A{blob.area_index}", (int(blob.cx * inv) + 14, int(blob.cy * inv) + 6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         return out

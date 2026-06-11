@@ -19,6 +19,9 @@ MOG2_VAR_THRESHOLD = 25
 # Minimum foreground blob area in pixels (at detection scale)
 MIN_PERSON_BLOB_AREA = 2000
 
+# YOLOv8 person detection confidence threshold
+YOLO_CONF_THRESHOLD = 0.4
+
 # Jump detection
 JUMP_Y_THRESHOLD = 0.04   # normalized Y displacement (fraction of frame height)
 JUMP_DEBOUNCE_SEC = 0.5   # seconds between jump counts per blob
@@ -33,7 +36,7 @@ PHASE_DURATIONS = {
     "ANIMAL": 4,
     "FRUIT_SELECT": 15,     # stand in areas, fruits fall proportionally
     "MIX": 15,              # everyone jumps to mix
-    "RESULT": 6,
+    "RESULT": 12,
 }
 
 # Total jumps (all areas combined) to reach mix_level=1.0

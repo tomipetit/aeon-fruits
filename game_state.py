@@ -33,7 +33,7 @@ class JuiceGame:
         # Accumulated area counts during FRUIT_SELECT (used to compute proportions)
         self._area_accum: list[float] = [0.0] * config.NUM_AREAS
         self.match_score: float = 0.0
-        self.star_rating: int = 0
+        self.star_rating: float = 0.0
 
         self._last_area_counts: list[int] = [0] * config.NUM_AREAS
         self.taste_comment: str = ""
@@ -60,6 +60,10 @@ class JuiceGame:
         elif self.state == GameState.FRUIT_SELECT:
             for i, cnt in enumerate(area_counts):
                 self._area_accum[i] += cnt
+            # live update so renderer can show real-time proportions
+            total = sum(self._area_accum)
+            if total > 0:
+                self.fruit_proportions = [v / total for v in self._area_accum]
             if elapsed >= config.PHASE_DURATIONS["FRUIT_SELECT"]:
                 self._lock_fruit_proportions()
                 self._enter(GameState.MIX)
@@ -120,7 +124,7 @@ class JuiceGame:
         ideal = self.animal["ideal_mix"]
         diff = sum(abs(a - b) for a, b in zip(self.fruit_proportions, ideal))
         self.match_score = max(0.0, 1.0 - diff / 2.0)
-        self.star_rating = max(1, round(self.match_score * 5))
+        self.star_rating = max(0.5, round(self.match_score * 10) / 2)  # 0.5 to 5.0
 
     def get_render_data(self) -> dict:
         return {

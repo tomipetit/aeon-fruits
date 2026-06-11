@@ -29,13 +29,13 @@ def generate_taste_comment(
                 f"今回作ったジュースは {fruit_desc} でできています。"
                 f"マッチスコアは{score_pct}点です。"
                 f"このジュースの味の感想を、子供向けに「{animal['name']}」のセリフとして"
-                f"かわいく2〜3文の日本語で書いてください。"
+                f"かわいく1文・50文字以内の日本語で書いてください。"
                 f"文末は「！」や「♪」などで明るく締めてください。"
             )
 
             response = client.messages.create(
                 model="claude-haiku-4-5",
-                max_tokens=200,
+                max_tokens=150,
                 messages=[{"role": "user", "content": prompt}],
             )
 
@@ -43,6 +43,7 @@ def generate_taste_comment(
                 (b.text for b in response.content if b.type == "text"),
                 "おいしいジュースができたよ！",
             )
+            print(f"[ai_comment] score={score_pct}% | {text}")
             callback(text)
         except Exception as e:
             print(f"[ai_comment] error: {e}")

@@ -1,6 +1,4 @@
 import math
-import random
-from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -42,14 +40,6 @@ _STATE_LABELS = {
     GameState.MIX:          "JUMP to mix!",
     GameState.RESULT:       "",
 }
-
-
-@dataclass
-class _Particle:
-    x: float
-    y: float
-    vy: float
-    area_index: int
 
 
 def _alpha_blend(base: np.ndarray, overlay_bgr: np.ndarray, alpha: float) -> np.ndarray:
@@ -135,6 +125,20 @@ def _draw_mixer(frame: np.ndarray, data: dict):
                 _FONT, 1.4, (255, 255, 255), 3, cv2.LINE_AA)
 
 
+def _proportions_to_units(proportions: list[float], total_units: int = 30) -> list[int]:
+    raw = [max(0.0, p) * total_units for p in proportions]
+    units = [int(v) for v in raw]
+    remaining = total_units - sum(units)
+    remainders = sorted(
+        range(len(raw)),
+        key=lambda i: raw[i] - units[i],
+        reverse=True,
+    )
+    for i in remainders[:max(0, remaining)]:
+        units[i] += 1
+    return units
+
+
 def _wrap_ja(text: str, max_chars: int = 22) -> list[str]:
     """Split Japanese text into lines of at most max_chars characters."""
     lines: list[str] = []
@@ -150,13 +154,14 @@ def _wrap_ja(text: str, max_chars: int = 22) -> list[str]:
 
 
 def _draw_stars(frame: np.ndarray, data: dict):
-    stars = data["star_rating"]
+    stars = data["star_rating"]  # float, 0.5 steps, 0.5–5.0
     star_size = 60
-    total_w = stars * (star_size * 2 + 10)
+    n_stars = 5
+    total_w = n_stars * (star_size * 2 + 10)
     start_x = (config.WIDTH - total_w) // 2
     y = config.HEIGHT // 2 + 160
 
-    for i in range(stars):
+    for i in range(n_stars):
         cx = start_x + i * (star_size * 2 + 10) + star_size
         pts = []
         for j in range(5):
@@ -167,8 +172,23 @@ def _draw_stars(frame: np.ndarray, data: dict):
             pts.append([int(cx + star_size * 0.4 * math.cos(inner)),
                         int(y - star_size * 0.4 * math.sin(inner))])
         pts_arr = np.array(pts, np.int32).reshape((-1, 1, 2))
-        cv2.fillPoly(frame, [pts_arr], (0, 215, 255))
-        cv2.polylines(frame, [pts_arr], True, (0, 165, 200), 2)
+
+        fill = max(0.0, min(1.0, stars - i))
+
+        if fill >= 1.0:
+            # Full star
+            cv2.fillPoly(frame, [pts_arr], (0, 215, 255))
+            cv2.polylines(frame, [pts_arr], True, (0, 165, 200), 2)
+        elif fill >= 0.5:
+            # Half star — fill left half using mask
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [pts_arr], 255)
+            mask[:, cx:] = 0
+            frame[mask > 0] = (0, 215, 255)
+            cv2.polylines(frame, [pts_arr], True, (0, 165, 200), 2)
+        else:
+            # Empty star — outline only
+            cv2.polylines(frame, [pts_arr], True, (120, 120, 120), 2)
 
     score_pct = int(data["match_score"] * 100)
     cv2.putText(frame, f"MATCH {score_pct}%",
@@ -188,71 +208,45 @@ def _draw_hud(frame: np.ndarray, state: GameState):
 _ICON_RADIUS_MIN = 60.0
 _ICON_RADIUS_MAX = 260.0
 _ICON_LERP = 0.10  # smoothing factor per frame
+_BOTTLE_LERP = 0.12
+_MIX_TOTAL_UNITS = 30
 
 
 class ARRenderer:
     def __init__(self):
-        self._particles: list[_Particle] = []
-        self._resting_counts: list[int] = [0] * config.NUM_AREAS
-        self._spawn_accum: list[float] = [0.0] * config.NUM_AREAS
-        self._smooth_radii: list[float] = [0.0] * config.NUM_AREAS
+        self._smooth_radii: list[float] = [_ICON_RADIUS_MIN] * config.NUM_AREAS
+        self._smooth_fill_levels: list[float] = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
         self._prev_state: GameState | None = None
 
     def _reset(self):
-        self._particles.clear()
-        self._resting_counts = [0] * config.NUM_AREAS
-        self._spawn_accum = [0.0] * config.NUM_AREAS
-        self._smooth_radii = [0.0] * config.NUM_AREAS
+        self._smooth_radii = [_ICON_RADIUS_MIN] * config.NUM_AREAS
+        self._smooth_fill_levels = [1.0 / config.NUM_AREAS] * config.NUM_AREAS
 
-    def _spawn_particles(self, area_counts: list[int], area_fruits: list[dict]):
+    def _draw_area_bottles(self, frame: np.ndarray, data: dict):
         area_w = config.WIDTH // config.NUM_AREAS
-        total = sum(area_counts) or 1
-        for i, cnt in enumerate(area_counts):
-            rate = (cnt / total) * config.FRUIT_SPAWN_RATE / 30.0  # per frame at ~30fps
-            self._spawn_accum[i] += rate
-            while self._spawn_accum[i] >= 1.0:
-                self._spawn_accum[i] -= 1.0
-                x = random.uniform(i * area_w + 40, (i + 1) * area_w - 40)
-                self._particles.append(_Particle(
-                    x=x, y=-config.FRUIT_PARTICLE_RADIUS,
-                    vy=config.FRUIT_PARTICLE_SPEED,
-                    area_index=i,
-                ))
+        bottle_top = 190
+        bottle_bottom = config.HEIGHT - 115
+        bottle_h = bottle_bottom - bottle_top
+        for i, fruit in enumerate(data["area_fruits"]):
+            x1 = i * area_w + 78
+            x2 = (i + 1) * area_w - 78
+            fill_h = int(bottle_h * self._smooth_fill_levels[i])
+            fill_y = bottle_bottom - fill_h
+            color = fruit["bgr"]
 
-    def _update_particles(self):
-        alive = []
-        rest_y = config.HEIGHT - 80
-        for p in self._particles:
-            p.y += p.vy
-            if p.y >= rest_y:
-                self._resting_counts[p.area_index] += 1
-            else:
-                alive.append(p)
-        self._particles = alive
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (x1, fill_y), (x2, bottle_bottom), color, -1)
+            _alpha_blend(frame, overlay, 0.34)
 
-    def _draw_particles(self, frame: np.ndarray, area_fruits: list[dict]):
-        r = config.FRUIT_PARTICLE_RADIUS
-        for p in self._particles:
-            color = area_fruits[p.area_index]["bgr"]
-            cv2.circle(frame, (int(p.x), int(p.y)), r, color, -1)
-            cv2.circle(frame, (int(p.x), int(p.y)), r, (255, 255, 255), 2)
-
-    def _draw_resting_counts(self, frame: np.ndarray, data: dict):
-        area_w = config.WIDTH // config.NUM_AREAS
-        total = sum(self._resting_counts) or 1
-        for i, cnt in enumerate(self._resting_counts):
-            color = data["area_fruits"][i]["bgr"]
-            x1, x2 = i * area_w, (i + 1) * area_w
-            # Semi-transparent bar proportional to resting count
-            bar_h = int((cnt / max(total, 1)) * 200)
-            if bar_h > 0:
-                overlay = frame.copy()
-                cv2.rectangle(overlay, (x1 + 5, config.HEIGHT - 80 - bar_h),
-                               (x2 - 5, config.HEIGHT - 80), color, -1)
-                _alpha_blend(frame, overlay, 0.45)
-            cv2.putText(frame, str(cnt),
-                        (x1 + area_w // 2 - 20, config.HEIGHT - 90),
-                        _FONT_BOLD, 1.8, (255, 255, 255), 4, cv2.LINE_AA)
+            neck_w = max(90, (x2 - x1) // 4)
+            neck_x1 = (x1 + x2 - neck_w) // 2
+            neck_x2 = neck_x1 + neck_w
+            cv2.rectangle(frame, (neck_x1, bottle_top - 36), (neck_x2, bottle_top),
+                          (255, 255, 255), 3)
+            cv2.rectangle(frame, (x1, bottle_top), (x2, bottle_bottom),
+                          (255, 255, 255), 4)
+            cv2.line(frame, (x1 + 16, fill_y), (x2 - 16, fill_y),
+                     (255, 255, 255), 2, cv2.LINE_AA)
 
     def render(self, bgr_frame: np.ndarray, data: dict) -> np.ndarray:
         state: GameState = data["state"]
@@ -274,15 +268,15 @@ class ARRenderer:
             ja_texts += _draw_animal_box(frame, data, small=False)
 
         elif state == GameState.FRUIT_SELECT:
-            self._spawn_particles(data["area_counts"], data["area_fruits"])
-            self._update_particles()
-
-            # Update smooth radii toward target based on accumulated count
-            for i, cnt in enumerate(self._resting_counts):
-                target = _ICON_RADIUS_MIN + (_ICON_RADIUS_MAX - _ICON_RADIUS_MIN) * min(cnt / 50.0, 1.0)
+            # Update smooth radii toward target from live fruit_proportions
+            for i, prop in enumerate(data["fruit_proportions"]):
+                target = _ICON_RADIUS_MIN + (_ICON_RADIUS_MAX - _ICON_RADIUS_MIN) * prop
                 self._smooth_radii[i] += (target - self._smooth_radii[i]) * _ICON_LERP
+                self._smooth_fill_levels[i] += (prop - self._smooth_fill_levels[i]) * _BOTTLE_LERP
 
-            # Draw centered fruit icons with count inside
+            self._draw_area_bottles(frame, data)
+            mix_units = _proportions_to_units(data["fruit_proportions"], _MIX_TOTAL_UNITS)
+            # Draw centered fruit icons sized by proportion
             area_w = config.WIDTH // config.NUM_AREAS
             for i, fruit in enumerate(data["area_fruits"]):
                 cx = i * area_w + area_w // 2
@@ -291,19 +285,18 @@ class ARRenderer:
                 color = fruit["bgr"]
                 cv2.circle(frame, (cx, cy), r, color, -1)
                 cv2.circle(frame, (cx, cy), r, (255, 255, 255), max(3, r // 25))
-                # Count number centered inside the icon
+                # Show mix units inside icon (sum is 30)
                 if r > 40:
-                    count_str = str(self._resting_counts[i])
+                    ratio_str = str(mix_units[i])
                     fscale = max(1.2, r / 90.0) * 2.0
                     thickness = max(4, r // 30)
-                    (tw, th), _ = cv2.getTextSize(count_str, _FONT_BOLD, fscale, thickness)
+                    (tw, th), _ = cv2.getTextSize(ratio_str, _FONT_BOLD, fscale, thickness)
                     tx, ty = cx - tw // 2, cy + th // 2
-                    cv2.putText(frame, count_str, (tx, ty), _FONT_BOLD, fscale,
+                    cv2.putText(frame, ratio_str, (tx, ty), _FONT_BOLD, fscale,
                                 (255, 255, 255), thickness + 4, cv2.LINE_AA)
-                    cv2.putText(frame, count_str, (tx, ty), _FONT_BOLD, fscale,
+                    cv2.putText(frame, ratio_str, (tx, ty), _FONT_BOLD, fscale,
                                 (30, 30, 30), thickness, cv2.LINE_AA)
 
-            self._draw_particles(frame, data["area_fruits"])
             ja_texts += _draw_fruit_labels(frame, data)
             ja_texts += _draw_animal_box(frame, data, small=True)
 
@@ -324,7 +317,7 @@ class ARRenderer:
                 cx = config.WIDTH // 2
                 base_y = config.HEIGHT // 2 + 330
                 for i, line in enumerate(_wrap_ja(comment)):
-                    ja_texts.append((line, cx, base_y + i * 46, 34, (255, 255, 255), "ms"))
+                    ja_texts.append((line, cx, base_y + i * 70, 34, (255, 255, 255), "mm"))
 
         _draw_ja_texts(frame, ja_texts)
         _draw_hud(frame, state)
