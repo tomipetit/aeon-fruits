@@ -249,6 +249,12 @@ def _draw_area_dividers(frame: np.ndarray):
         cv2.line(frame, (x, 0), (x, config.HEIGHT), (200, 200, 200), 3)
 
 
+def _typewriter(text: str, elapsed: float, offset: float = 0.0) -> str:
+    """Return the prefix of text visible at the given elapsed time."""
+    chars = max(0, int((elapsed - offset) * config.TYPEWRITER_CHARS_PER_SEC))
+    return text[:chars]
+
+
 def _pixel_wrap(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
     """Split text into lines so each line's pixel width fits within max_width."""
     lines: list[str] = []
@@ -595,11 +601,15 @@ class ARRenderer:
 
         elif state == GameState.INTRO1:
             _draw_bg(frame, _get_bg_shop())
-            _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40, text=_INTRO1_TEXT, font_size=38)
+            _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40,
+                                text=_typewriter(_INTRO1_TEXT, data["elapsed"]), font_size=38)
 
         elif state == GameState.INTRO2:
             _draw_bg(frame, _get_bg_order())
-            intro2_text = _INTRO2_TEXT2 if data["elapsed"] >= 4.0 else _INTRO2_TEXT
+            if data["elapsed"] >= 4.0:
+                intro2_text = _typewriter(_INTRO2_TEXT2, data["elapsed"], offset=4.0)
+            else:
+                intro2_text = _typewriter(_INTRO2_TEXT, data["elapsed"])
             _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40, text=intro2_text, font_size=38)
 
         elif state == GameState.INTRO3:
@@ -624,7 +634,9 @@ class ARRenderer:
                 frame, sprites[sprite_idx], config.WIDTH // 2, _ANIMAL_COUNTER_TOP_Y, 500
             )
             if data["elapsed"] >= 1.0:
-                _draw_animal_bubble(frame, data)
+                pref = data["animal"]["pref"]
+                _draw_animal_bubble(frame, data,
+                                    text=_typewriter(pref, data["elapsed"], offset=1.0))
 
         elif state == GameState.FRUIT_SELECT:
             # Update smooth radii toward target from live fruit_proportions
@@ -645,7 +657,9 @@ class ARRenderer:
                 _composite_sprite(frame, sprites[sprite_idx], cx, cy, r)
 
             ja_texts += _draw_fruit_labels(frame, data)
-            _draw_animal_bubble(frame, data, top_y=20)
+            pref = data["animal"]["pref"]
+            _draw_animal_bubble(frame, data, top_y=20,
+                                text=_typewriter(pref, data["elapsed"]))
             _draw_countdown(frame, data["elapsed"])
 
         elif state == GameState.MIX:
@@ -673,7 +687,8 @@ class ARRenderer:
             gx = (config.WIDTH  - gw) // 2
             gy = (config.HEIGHT - gh) // 2
             draw_glass(frame, gx, gy, gw, gh, color_bgr=juice_color, fill_level=fill)
-            _draw_animal_bubble(frame, data, top_y=60, text="完成！")
+            _draw_animal_bubble(frame, data, top_y=60,
+                                text=_typewriter("完成！", data["elapsed"]))
 
         elif state == GameState.RESULT:
             _draw_bg(frame, _get_bg_pour())
@@ -686,7 +701,8 @@ class ARRenderer:
             # Taste comment bubble above the animal
             comment = data.get("taste_comment", "")
             if comment:
-                _draw_animal_bubble(frame, data, text=comment, font_size=36)
+                _draw_animal_bubble(frame, data,
+                                    text=_typewriter(comment, data["elapsed"]), font_size=36)
             _draw_stars(frame, data)
 
         _draw_ja_texts(frame, ja_texts)
