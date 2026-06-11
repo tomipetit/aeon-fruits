@@ -288,7 +288,7 @@ def _draw_animal_bubble(
     line_bboxes = [dummy_draw.textbbox((0, 0), ln, font=font) for ln in lines]
     max_tw = max(bb[2] - bb[0] for bb in line_bboxes)
     line_h = max(bb[3] - bb[1] for bb in line_bboxes)
-    line_spacing = 80
+    line_spacing = 20
     total_text_h = line_h * len(lines) + line_spacing * (len(lines) - 1)
 
     bw = min(max_tw + pad_x * 2, max_bubble_w)
