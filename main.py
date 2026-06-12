@@ -86,7 +86,6 @@ def main():
     # ----- Window -----
     win = "AR Game"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(win, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     if config.DISPLAY_MONITOR_OFFSET_X:
         cv2.moveWindow(win, config.DISPLAY_MONITOR_OFFSET_X, 0)
 

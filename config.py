@@ -172,4 +172,4 @@ ANIMALS = [
 ANIMALS_PER_SESSION = 3
 
 # Typewriter effect: characters revealed per second in speech bubbles
-TYPEWRITER_CHARS_PER_SEC = 10
+TYPEWRITER_CHARS_PER_SEC = 15

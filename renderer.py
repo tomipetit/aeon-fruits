@@ -25,15 +25,27 @@ def _ease_out_elastic(t: float) -> float:
 
 # ---------- backgrounds ----------
 
+def _load_bg(filename: str, *, align: str = "center") -> np.ndarray:
+    """Load a background image, scale-to-cover (aspect-ratio preserved).
+    align='center': crop from vertical center. align='bottom': crop from bottom."""
+    path = os.path.join(os.path.dirname(__file__), "assets", filename)
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    ih, iw = img.shape[:2]
+    scale = max(config.WIDTH / iw, config.HEIGHT / ih)
+    nw, nh = int(iw * scale), int(ih * scale)
+    img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+    x0 = (nw - config.WIDTH) // 2
+    y0 = (nh - config.HEIGHT) if align == "bottom" else (nh - config.HEIGHT) // 2
+    return img[y0:y0 + config.HEIGHT, x0:x0 + config.WIDTH]
+
+
 _bg_title: np.ndarray | None = None
 
 
 def _get_bg_title() -> np.ndarray:
     global _bg_title
     if _bg_title is None:
-        path = os.path.join(os.path.dirname(__file__), "assets", "title.png")
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        _bg_title = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+        _bg_title = _load_bg("title.png")
     return _bg_title
 
 
@@ -43,9 +55,7 @@ _bg_shop: np.ndarray | None = None
 def _get_bg_shop() -> np.ndarray:
     global _bg_shop
     if _bg_shop is None:
-        path = os.path.join(os.path.dirname(__file__), "assets", "shop.png")
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        _bg_shop = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+        _bg_shop = _load_bg("shop.png")
     return _bg_shop
 
 
@@ -55,9 +65,7 @@ _bg_order: np.ndarray | None = None
 def _get_bg_order() -> np.ndarray:
     global _bg_order
     if _bg_order is None:
-        path = os.path.join(os.path.dirname(__file__), "assets", "juice_stand_order.png")
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        _bg_order = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+        _bg_order = _load_bg("juice_stand_order.png")
     return _bg_order
 
 
@@ -67,9 +75,7 @@ _bg_pour: np.ndarray | None = None
 def _get_bg_pour() -> np.ndarray:
     global _bg_pour
     if _bg_pour is None:
-        path = os.path.join(os.path.dirname(__file__), "assets", "juice_stand_inside.png")
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        _bg_pour = cv2.resize(img, (config.WIDTH, config.HEIGHT), interpolation=cv2.INTER_AREA)
+        _bg_pour = _load_bg("juice_stand_inside.png", align="bottom")
     return _bg_pour
 
 
@@ -96,8 +102,8 @@ def _get_animal_sprites() -> list[np.ndarray]:
     return _animal_sprites
 
 
-# Y position of counter top in juice_stand_inside.png scaled to 1920×1080
-_ANIMAL_COUNTER_TOP_Y = 860
+# Y position of counter top in juice_stand_inside.png (bottom-aligned crop)
+_ANIMAL_COUNTER_TOP_Y = 782
 
 _eval_sprites: list[list[np.ndarray]] | None = None  # [row][col], 4 rows x 10 cols
 
@@ -223,7 +229,7 @@ def _draw_ja_texts(frame: np.ndarray,
 
 _INTRO1_TEXT = "森に新しくジュース屋さんができました。\n東三河で取れたおいしい果物を使ってジュースを作ってくれます。"
 _INTRO2_TEXT  = "好みを聞いて、あなたに合うジュースをつくりますよ！"
-_INTRO2_TEXT2 = "そこにいるみんなにはジュースづくりのお手伝いをしてもらおうかな！"
+_INTRO2_TEXT2 = "あ、そうだ！\nそこにいるみんなにはジュースづくりのお手伝いをしてもらおうかな！"
 
 _STATE_LABELS = {
     GameState.IDLE:         "READY  [SPACE to start]",
@@ -285,19 +291,18 @@ def _draw_animal_bubble(
     font = _get_font_ja_bold(font_size)
 
     pad_x, pad_y = 48, 28
-    max_bubble_w = int(config.WIDTH * 0.9)
+    max_bubble_w = int(config.WIDTH * 0.8)
     max_text_w = max_bubble_w - pad_x * 2
 
     dummy_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     lines = _pixel_wrap(pref_text, font, max_text_w, dummy_draw)
 
     line_bboxes = [dummy_draw.textbbox((0, 0), ln, font=font) for ln in lines]
-    max_tw = max(bb[2] - bb[0] for bb in line_bboxes)
     line_h = max(bb[3] - bb[1] for bb in line_bboxes)
     line_spacing = 20
     total_text_h = line_h * len(lines) + line_spacing * (len(lines) - 1)
 
-    bw = min(max_tw + pad_x * 2, max_bubble_w)
+    bw = max_bubble_w
     bh = total_text_h + pad_y * 2
     cx = config.WIDTH // 2
     bx1, bx2 = cx - bw // 2, cx + bw // 2
@@ -602,14 +607,14 @@ class ARRenderer:
         elif state == GameState.INTRO1:
             _draw_bg(frame, _get_bg_shop())
             _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40,
-                                text=_typewriter(_INTRO1_TEXT, data["elapsed"]), font_size=38)
+                                text=_typewriter(_INTRO1_TEXT, data["elapsed"], offset=0.2), font_size=38)
 
         elif state == GameState.INTRO2:
             _draw_bg(frame, _get_bg_order())
             if data["elapsed"] >= 4.0:
-                intro2_text = _typewriter(_INTRO2_TEXT2, data["elapsed"], offset=4.0)
+                intro2_text = _typewriter(_INTRO2_TEXT2, data["elapsed"], offset=4.2)
             else:
-                intro2_text = _typewriter(_INTRO2_TEXT, data["elapsed"])
+                intro2_text = _typewriter(_INTRO2_TEXT, data["elapsed"], offset=0.2)
             _draw_animal_bubble(frame, data, bottom_y=config.HEIGHT - 40, text=intro2_text, font_size=38)
 
         elif state == GameState.INTRO3:
@@ -636,7 +641,7 @@ class ARRenderer:
             if data["elapsed"] >= 1.0:
                 pref = data["animal"]["pref"]
                 _draw_animal_bubble(frame, data,
-                                    text=_typewriter(pref, data["elapsed"], offset=1.0))
+                                    text=_typewriter(pref, data["elapsed"], offset=1.2))
 
         elif state == GameState.FRUIT_SELECT:
             # Update smooth radii toward target from live fruit_proportions
@@ -659,7 +664,7 @@ class ARRenderer:
             ja_texts += _draw_fruit_labels(frame, data)
             pref = data["animal"]["pref"]
             _draw_animal_bubble(frame, data, top_y=20,
-                                text=_typewriter(pref, data["elapsed"]))
+                                text=_typewriter(pref, data["elapsed"], offset=0.2))
             _draw_countdown(frame, data["elapsed"])
 
         elif state == GameState.MIX:
@@ -688,7 +693,7 @@ class ARRenderer:
             gy = (config.HEIGHT - gh) // 2
             draw_glass(frame, gx, gy, gw, gh, color_bgr=juice_color, fill_level=fill)
             _draw_animal_bubble(frame, data, top_y=60,
-                                text=_typewriter("完成！", data["elapsed"]))
+                                text=_typewriter("完成！", data["elapsed"], offset=0.2))
 
         elif state == GameState.RESULT:
             _draw_bg(frame, _get_bg_pour())
@@ -702,7 +707,7 @@ class ARRenderer:
             comment = data.get("taste_comment", "")
             if comment:
                 _draw_animal_bubble(frame, data,
-                                    text=_typewriter(comment, data["elapsed"]), font_size=36)
+                                    text=_typewriter(comment, data["elapsed"], offset=0.2), font_size=36)
             _draw_stars(frame, data)
 
         _draw_ja_texts(frame, ja_texts)
