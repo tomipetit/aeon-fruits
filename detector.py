@@ -1,14 +1,21 @@
 from collections import deque
 import contextlib
 import os
+import threading
 import time
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+import config
+
 
 @contextlib.contextmanager
 def _mute_stderr():
-    """Suppress C-level stderr output (e.g. MPS fallback warnings from PyTorch)."""
+    """Suppress C-level stderr (e.g. MPS fallback warnings from PyTorch)."""
     saved = os.dup(2)
     devnull = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull, 2)
@@ -18,12 +25,6 @@ def _mute_stderr():
     finally:
         os.dup2(saved, 2)
         os.close(saved)
-
-import cv2
-import numpy as np
-from ultralytics import YOLO
-
-import config
 
 
 class _TrackedBlob:
@@ -61,10 +62,51 @@ class MotionDetector:
         self._frame_number = 0
         self._jump_counts = [0] * config.NUM_AREAS
 
-        # Spin detection state
-        self._prev_gray: np.ndarray | None = None
-        self._spin_consec_frames = 0
-        self._spin_frames_needed = int(config.SPIN_DURATION_SEC * 30)
+        # Background inference thread
+        self._lock = threading.Lock()
+        self._pending_frame: np.ndarray | None = None
+        self._pending_use_face: bool = False
+        self._latest_detections: list[tuple] = []
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    # ---- background inference ------------------------------------------ #
+
+    def _worker(self):
+        """Continuously pull the latest pending frame and run YOLO on it."""
+        while True:
+            with self._lock:
+                frame = self._pending_frame
+                use_face = self._pending_use_face
+                if frame is not None:
+                    self._pending_frame = None
+
+            if frame is None:
+                time.sleep(0.002)
+                continue
+
+            model = self._model_face if use_face else self._model_person
+            with _mute_stderr():
+                results = model(
+                    frame,
+                    conf=config.YOLO_CONF_THRESHOLD,
+                    classes=[0],
+                    verbose=False,
+                )
+
+            detections: list[tuple] = []
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    area_index = self._area_for_cx(cx)
+                    detections.append((cx, cy, area_index, (x1, y1, x2, y2)))
+
+            with self._lock:
+                self._latest_detections = detections
+
+    # ---- main-thread update -------------------------------------------- #
 
     def _area_for_cx(self, cx: float) -> int:
         for boundary_idx in range(1, config.NUM_AREAS):
@@ -75,31 +117,17 @@ class MotionDetector:
 
     def update(self, bgr_frame: np.ndarray, use_face_model: bool = False):
         self._frame_number += 1
-
         small = cv2.resize(bgr_frame, (self._frame_w_scaled, self._frame_h_scaled))
 
-        # Switch model by phase: face for area counting, person for jump counting
-        model = self._model_face if use_face_model else self._model_person
-        with _mute_stderr():
-            results = model(
-                small,
-                conf=config.YOLO_CONF_THRESHOLD,
-                classes=[0],
-                verbose=False,
-            )
+        # Submit frame to worker (non-blocking — drops previous pending if busy)
+        with self._lock:
+            self._pending_frame = small
+            self._pending_use_face = use_face_model
+            detections = list(self._latest_detections)
 
-        detections: list[tuple[float, float, int, tuple]] = []  # (cx, cy, area_index, bbox)
-        if results and results[0].boxes is not None:
-            for box in results[0].boxes:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                cx = (x1 + x2) / 2
-                cy = (y1 + y2) / 2
-                area_index = self._area_for_cx(cx)
-                detections.append((cx, cy, area_index, (x1, y1, x2, y2)))
-
-        # Nearest-neighbour tracking
+        # Nearest-neighbour tracking with latest detections
         max_dist = self._frame_w_scaled / 8
-        matched_blob_ids = set()
+        matched_blob_ids: set[int] = set()
         new_blobs: list[_TrackedBlob] = []
         for cx, cy, area_idx, bbox in detections:
             best: _TrackedBlob | None = None
@@ -126,7 +154,7 @@ class MotionDetector:
                 b.last_seen_frame = self._frame_number
                 new_blobs.append(b)
 
-        # Keep old blobs that disappeared recently (up to 10 frames dropout tolerance)
+        # Retain recently seen blobs (dropout tolerance: 10 frames)
         for blob in self._blobs:
             if blob.blob_id not in matched_blob_ids:
                 if self._frame_number - blob.last_seen_frame <= 10:
@@ -134,30 +162,14 @@ class MotionDetector:
 
         self._blobs = new_blobs
 
-        # Spin detection via optical flow
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-        if self._prev_gray is not None:
-            flow = cv2.calcOpticalFlowFarneback(
-                self._prev_gray, gray, None,
-                pyr_scale=0.5, levels=2, winsize=15,
-                iterations=2, poly_n=5, poly_sigma=1.1, flags=0,
-            )
-            mean_flow = float(np.mean(np.abs(flow[..., 0])))
-            if mean_flow > config.SPIN_FLOW_THRESHOLD:
-                self._spin_consec_frames += 1
-            else:
-                self._spin_consec_frames = max(0, self._spin_consec_frames - 1)
-        self._prev_gray = gray
-
     def _detect_jump(self, blob: _TrackedBlob):
         if len(blob.y_history) < 6:
             return
         history = list(blob.y_history)
-        dy = history[-1] - history[-5]  # positive = moving down in image (y increases downward)
+        dy = history[-1] - history[-5]  # positive = moving down (y increases downward)
         now = time.monotonic()
 
         if blob._jump_state == "GROUND":
-            # dy negative means person moved up (Y decreased)
             if dy < -(self._frame_h_scaled * config.JUMP_Y_THRESHOLD):
                 blob._jump_state = "RISING"
                 blob._peak_y = blob.cy
@@ -165,7 +177,6 @@ class MotionDetector:
         elif blob._jump_state == "RISING":
             if blob.cy < blob._peak_y:
                 blob._peak_y = blob.cy
-            # dy positive = coming back down
             if dy > (self._frame_h_scaled * config.JUMP_Y_THRESHOLD * 0.5):
                 blob._jump_state = "FALLING"
 
@@ -175,6 +186,8 @@ class MotionDetector:
                     self._jump_counts[blob.area_index] += 1
                     blob._last_jump_time = now
                 blob._jump_state = "GROUND"
+
+    # ---- accessors ----------------------------------------------------- #
 
     def get_area_counts(self) -> list[int]:
         counts = [0] * config.NUM_AREAS
@@ -189,7 +202,6 @@ class MotionDetector:
         return counts
 
     def get_face_positions(self) -> list[tuple[int, int]]:
-        """Returns active face centroid positions in full-resolution coordinates."""
         inv = 1.0 / self._scale
         return [
             (int(blob.cx * inv), int(blob.cy * inv))
@@ -198,31 +210,23 @@ class MotionDetector:
         ]
 
     def is_spinning(self) -> bool:
-        return self._spin_consec_frames >= self._spin_frames_needed
+        return False  # spin detection removed (unused)
 
     def get_debug_overlay(self, bgr_frame: np.ndarray) -> np.ndarray:
         out = bgr_frame.copy()
-        # Area dividers
         for i in range(1, config.NUM_AREAS):
             x = config.WIDTH * i // config.NUM_AREAS
             cv2.line(out, (x, 0), (x, config.HEIGHT), (255, 255, 0), 2)
-        # Blob bounding boxes (scale back up to full resolution)
         inv = 1.0 / self._scale
         for blob in self._blobs:
             if self._frame_number - blob.last_seen_frame <= 2:
                 if blob.bbox is not None:
                     x1, y1, x2, y2 = blob.bbox
-                    rx1 = int(x1 * inv)
-                    ry1 = int(y1 * inv)
-                    rx2 = int(x2 * inv)
-                    ry2 = int(y2 * inv)
-                    cv2.rectangle(out, (rx1, ry1), (rx2, ry2), (0, 255, 0), 2)
-                    cx = int(blob.cx * inv)
-                    cy = int(blob.cy * inv)
+                    cv2.rectangle(out, (int(x1 * inv), int(y1 * inv)),
+                                  (int(x2 * inv), int(y2 * inv)), (0, 255, 0), 2)
                 else:
-                    cx = int(blob.cx * inv)
-                    cy = int(blob.cy * inv)
-                    cv2.circle(out, (cx, cy), 12, (0, 255, 0), -1)
-                cv2.putText(out, f"A{blob.area_index}", (int(blob.cx * inv) + 14, int(blob.cy * inv) + 6),
+                    cv2.circle(out, (int(blob.cx * inv), int(blob.cy * inv)), 12, (0, 255, 0), -1)
+                cv2.putText(out, f"A{blob.area_index}",
+                            (int(blob.cx * inv) + 14, int(blob.cy * inv) + 6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         return out
