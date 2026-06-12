@@ -423,15 +423,56 @@ def _draw_mixer(frame: np.ndarray, data: dict):
     juice_color = _blended_juice_color(data)
     mix_level = data["mix_level"]
     cx, cy, r = config.WIDTH // 2, config.HEIGHT // 2, 360
+    now = time.time()
+
+    # Full-screen background bubbles (drawn before juice circle)
+    bg_bub = frame.copy()
+    rng_bg = np.random.default_rng(int(now * 3) % (2**31))
+    for _ in range(25):
+        bx = int(rng_bg.uniform(0, config.WIDTH))
+        by = int(rng_bg.uniform(0, config.HEIGHT))
+        br = int(rng_bg.uniform(5, 18))
+        cv2.circle(bg_bub, (bx, by), br, (255, 255, 255), -1)
+    cv2.addWeighted(bg_bub, 0.12, frame, 0.88, 0, frame)
 
     # Background circle
     cv2.circle(frame, (cx, cy), r, (80, 80, 80), -1)
     cv2.circle(frame, (cx, cy), r, (255, 255, 255), 6)
 
-    # Juice circle expanding from center
+    # Juice circle expanding from center (semi-transparent)
     juice_r = max(0, int(r * mix_level))
     if juice_r > 0:
-        cv2.circle(frame, (cx, cy), juice_r, juice_color, -1)
+        overlay = frame.copy()
+        cv2.circle(overlay, (cx, cy), juice_r, juice_color, -1)
+        cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+
+        # Rotating highlight arc
+        angle_deg = (now * 200) % 360
+        arc_overlay = frame.copy()
+        cv2.ellipse(arc_overlay, (cx, cy), (juice_r, juice_r),
+                    angle_deg, -40, 40, (255, 255, 255), -1)
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        cv2.circle(mask, (cx, cy), juice_r, 255, -1)
+        arc_region = cv2.bitwise_and(arc_overlay, arc_overlay, mask=mask)
+        cv2.addWeighted(arc_region, 0.25, frame, 0.75, 0, frame)
+
+    # Face-based bubbles: rise from each detected face toward the top of the screen
+    face_positions = data.get("face_positions", [])
+    if face_positions:
+        face_bub = frame.copy()
+        n_streams = 7
+        for fx, fy in face_positions:
+            for i in range(n_streams):
+                speed = 0.5 + i * 0.12   # screen-heights per second
+                phase = i / n_streams
+                t = (now * speed + phase) % 1.0
+                by = int(fy - t * (fy + 80))
+                jitter = int(math.sin(now * 2.0 + i * 1.9) * 28)
+                bx = fx + jitter
+                br = max(1, int(11 * (1.0 - t * 0.5)))
+                if 0 <= bx < config.WIDTH and 0 <= by < config.HEIGHT:
+                    cv2.circle(face_bub, (bx, by), br, (255, 255, 255), -1)
+        cv2.addWeighted(face_bub, 0.40, frame, 0.60, 0, frame)
 
     pct = int(mix_level * 100)
     cv2.putText(frame, f"{pct}%", (cx - 50, cy + 12),

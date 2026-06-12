@@ -130,6 +130,7 @@ def main():
         # -- Game logic --
         game.update(area_counts, jump_counts, spinning)
         render_data = game.get_render_data()
+        render_data["face_positions"] = detector.get_face_positions()
 
         # -- AR render --
         if debug_on:
