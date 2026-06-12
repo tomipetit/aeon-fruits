@@ -418,6 +418,7 @@ def _draw_mixer(frame: np.ndarray, data: dict):
     juice_color = _blended_juice_color(data)
     mix_level = data["mix_level"]
     cx, cy, r = config.WIDTH // 2, config.HEIGHT // 2, 360
+    now = time.time()
 
     # Background circle
     cv2.circle(frame, (cx, cy), r, (80, 80, 80), -1)
@@ -429,6 +430,30 @@ def _draw_mixer(frame: np.ndarray, data: dict):
         overlay = frame.copy()
         cv2.circle(overlay, (cx, cy), juice_r, juice_color, -1)
         cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+
+        # Rotating highlight arc
+        angle_deg = (now * 200) % 360
+        arc_overlay = frame.copy()
+        cv2.ellipse(arc_overlay, (cx, cy), (juice_r, juice_r),
+                    angle_deg, -40, 40, (255, 255, 255), -1)
+        # Mask arc to juice circle area
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        cv2.circle(mask, (cx, cy), juice_r, 255, -1)
+        arc_region = cv2.bitwise_and(arc_overlay, arc_overlay, mask=mask)
+        cv2.addWeighted(arc_region, 0.25, frame, 0.75, 0, frame)
+
+        # Bubble particles inside juice circle
+        rng = np.random.default_rng(int(now * 8) % (2**31))
+        n_bubbles = max(3, int(juice_r * 0.06))
+        for _ in range(n_bubbles):
+            angle = rng.uniform(0, 2 * math.pi)
+            dist = rng.uniform(0, juice_r * 0.85)
+            bx = int(cx + dist * math.cos(angle))
+            by = int(cy + dist * math.sin(angle))
+            br = int(rng.uniform(4, 14))
+            bub_overlay = frame.copy()
+            cv2.circle(bub_overlay, (bx, by), br, (255, 255, 255), -1)
+            cv2.addWeighted(bub_overlay, 0.30, frame, 0.70, 0, frame)
 
     pct = int(mix_level * 100)
     cv2.putText(frame, f"{pct}%", (cx - 50, cy + 12),
