@@ -79,6 +79,16 @@ def _get_bg_pour() -> np.ndarray:
     return _bg_pour
 
 
+_bg_ending: np.ndarray | None = None
+
+
+def _get_bg_ending() -> np.ndarray:
+    global _bg_ending
+    if _bg_ending is None:
+        _bg_ending = _load_bg("ending.png")
+    return _bg_ending
+
+
 def _draw_bg(frame: np.ndarray, bg: np.ndarray) -> None:
     if bg.ndim == 3 and bg.shape[2] == 4:
         a = bg[:, :, 3:].astype(np.float32) / 255.0
@@ -215,16 +225,20 @@ def _get_font_ja_bold(size: int) -> ImageFont.FreeTypeFont:
 def _draw_ja_texts(frame: np.ndarray,
                    texts: list[tuple[str, int, int, int, tuple, str]],
                    *,
-                   bold: bool = False) -> None:
+                   bold: bool = False,
+                   stroke_width: int = 0,
+                   stroke_bgr: tuple = (0, 0, 0)) -> None:
     """Batch-draw Japanese texts with a single BGR↔RGB conversion."""
     if not texts:
         return
     get_font = _get_font_ja_bold if bold else _get_font_ja
     pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
+    stroke_rgb = (int(stroke_bgr[2]), int(stroke_bgr[1]), int(stroke_bgr[0])) if stroke_width > 0 else None
     for text, x, y, size, bgr, anchor in texts:
         rgb = (int(bgr[2]), int(bgr[1]), int(bgr[0]))
-        draw.text((x, y), text, font=get_font(size), fill=rgb, anchor=anchor)
+        draw.text((x, y), text, font=get_font(size), fill=rgb, anchor=anchor,
+                  stroke_width=stroke_width, stroke_fill=stroke_rgb)
     frame[:] = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
 _INTRO1_TEXT = "森に新しくジュース屋さんができました。\n東三河で取れたおいしい果物を使ってジュースを作ってくれます。"
@@ -431,7 +445,7 @@ def _draw_mixer(frame: np.ndarray, data: dict):
     for _ in range(25):
         bx = int(rng_bg.uniform(0, config.WIDTH))
         by = int(rng_bg.uniform(0, config.HEIGHT))
-        br = int(rng_bg.uniform(5, 18))
+        br = int(rng_bg.uniform(10, 36))
         cv2.circle(bg_bub, (bx, by), br, (255, 255, 255), -1)
     cv2.addWeighted(bg_bub, 0.12, frame, 0.88, 0, frame)
 
@@ -447,7 +461,7 @@ def _draw_mixer(frame: np.ndarray, data: dict):
         cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
 
         # Rotating highlight arc
-        angle_deg = (now * 200) % 360
+        angle_deg = (now * 600) % 360
         arc_overlay = frame.copy()
         cv2.ellipse(arc_overlay, (cx, cy), (juice_r, juice_r),
                     angle_deg, -40, 40, (255, 255, 255), -1)
@@ -469,7 +483,7 @@ def _draw_mixer(frame: np.ndarray, data: dict):
                 by = int(fy - t * (fy + 80))
                 jitter = int(math.sin(now * 2.0 + i * 1.9) * 28)
                 bx = fx + jitter
-                br = max(1, int(11 * (1.0 - t * 0.5)))
+                br = max(1, int(22 * (1.0 - t * 0.5)))
                 if 0 <= bx < config.WIDTH and 0 <= by < config.HEIGHT:
                     cv2.circle(face_bub, (bx, by), br, (255, 255, 255), -1)
         cv2.addWeighted(face_bub, 0.40, frame, 0.60, 0, frame)
@@ -571,7 +585,8 @@ def _draw_hud(frame: np.ndarray, state: GameState):
         y = 100
     else:
         y = 170
-    _draw_ja_texts(frame, [(label, config.WIDTH // 2, y, 40, (255, 255, 255), "mm")], bold=True)
+    _draw_ja_texts(frame, [(label, config.WIDTH // 2, y, 40, (255, 255, 255), "mm")],
+                   bold=True, stroke_width=4, stroke_bgr=(10, 45, 100))
 
 
 _ICON_RADIUS_MIN = 60.0
@@ -591,6 +606,7 @@ class ARRenderer:
         _get_bg_shop()
         _get_bg_order()
         _get_bg_pour()
+        _get_bg_ending()
         _get_flash()
         _get_fruit_sprites()
         _get_animal_sprites()
@@ -630,6 +646,7 @@ class ARRenderer:
 
     def render(self, bgr_frame: np.ndarray, data: dict) -> np.ndarray:
         state: GameState = data["state"]
+        elapsed: float = data["elapsed"]
 
         # Reset particles at the start of each new round
         if self._prev_state != state and state == GameState.ANIMAL:
@@ -713,7 +730,6 @@ class ARRenderer:
 
         elif state == GameState.POUR:
             juice_color = _blended_juice_color(data)
-            elapsed = data["elapsed"]
 
             # Background
             _draw_bg(frame, _get_bg_pour())
@@ -751,6 +767,35 @@ class ARRenderer:
                                     text=_typewriter(comment, data["elapsed"], offset=0.2), font_size=36)
             _draw_stars(frame, data)
 
+        elif state == GameState.ENDING:
+            _draw_bg(frame, _get_bg_ending())
+            _draw_animal_bubble(frame, data, top_y=20,
+                                text=_typewriter("みんなおいしいジュースを作ってくれてありがとう♪\nまた森のジュース屋さんに遊びに来てね！", elapsed, offset=0.2))
+
         _draw_ja_texts(frame, ja_texts)
         _draw_hud(frame, state)
+
+        # Fade transitions
+        _FADE_SEC = 0.5
+        is_last = data.get("is_last_turn", False)
+        if state == GameState.RESULT:
+            result_dur = config.PHASE_DURATIONS["RESULT"]
+            if elapsed > result_dur - _FADE_SEC:
+                t = min(1.0, (elapsed - (result_dur - _FADE_SEC)) / _FADE_SEC)
+                if is_last:
+                    # 白フェードアウト
+                    white = np.full_like(frame, 255)
+                    frame[:] = (frame * (1.0 - t) + white * t).astype(np.uint8)
+                else:
+                    # 黒フェードアウト
+                    frame[:] = (frame * (1.0 - t)).astype(np.uint8)
+        elif state == GameState.ANIMAL and elapsed < _FADE_SEC:
+            t = 1.0 - elapsed / _FADE_SEC
+            frame[:] = (frame * (1.0 - t)).astype(np.uint8)
+        elif state == GameState.ENDING and elapsed < _FADE_SEC:
+            # 白からフェードイン
+            t = 1.0 - elapsed / _FADE_SEC
+            white = np.full_like(frame, 255)
+            frame[:] = (frame * (1.0 - t) + white * t).astype(np.uint8)
+
         return frame

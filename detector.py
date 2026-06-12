@@ -1,8 +1,23 @@
 from collections import deque
+import contextlib
 import os
 import time
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+
+@contextlib.contextmanager
+def _mute_stderr():
+    """Suppress C-level stderr output (e.g. MPS fallback warnings from PyTorch)."""
+    saved = os.dup(2)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
 
 import cv2
 import numpy as np
@@ -31,8 +46,10 @@ class _TrackedBlob:
 
 class MotionDetector:
     def __init__(self):
-        self._model = YOLO(config.YOLO_MODEL)
-        self._model.to("mps")
+        self._model_person = YOLO(config.YOLO_MODEL_PERSON)
+        self._model_face   = YOLO(config.YOLO_MODEL_FACE)
+        self._model_person.to("mps")
+        self._model_face.to("mps")
 
         self._scale = config.DETECTION_SCALE
         self._area_w = int(config.WIDTH * self._scale / config.NUM_AREAS)
@@ -56,18 +73,20 @@ class MotionDetector:
                 return boundary_idx - 1
         return config.NUM_AREAS - 1
 
-    def update(self, bgr_frame: np.ndarray):
+    def update(self, bgr_frame: np.ndarray, use_face_model: bool = False):
         self._frame_number += 1
 
         small = cv2.resize(bgr_frame, (self._frame_w_scaled, self._frame_h_scaled))
 
-        # Face detection (class 0 = face)
-        results = self._model(
-            small,
-            conf=config.YOLO_CONF_THRESHOLD,
-            classes=[0],
-            verbose=False,
-        )
+        # Switch model by phase: face for area counting, person for jump counting
+        model = self._model_face if use_face_model else self._model_person
+        with _mute_stderr():
+            results = model(
+                small,
+                conf=config.YOLO_CONF_THRESHOLD,
+                classes=[0],
+                verbose=False,
+            )
 
         detections: list[tuple[float, float, int, tuple]] = []  # (cx, cy, area_index, bbox)
         if results and results[0].boxes is not None:
@@ -131,10 +150,10 @@ class MotionDetector:
         self._prev_gray = gray
 
     def _detect_jump(self, blob: _TrackedBlob):
-        if len(blob.y_history) < 5:
+        if len(blob.y_history) < 6:
             return
         history = list(blob.y_history)
-        dy = history[-1] - history[-3]  # positive = moving down in image (y increases downward)
+        dy = history[-1] - history[-5]  # positive = moving down in image (y increases downward)
         now = time.monotonic()
 
         if blob._jump_state == "GROUND":

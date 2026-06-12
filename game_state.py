@@ -16,6 +16,7 @@ class GameState(Enum):
     MIX = auto()
     POUR = auto()
     RESULT = auto()
+    ENDING = auto()
 
 
 class JuiceGame:
@@ -52,7 +53,9 @@ class JuiceGame:
     # ------------------------------------------------------------------ #
 
     def start(self):
-        if self.state == GameState.IDLE:
+        if self.state == GameState.ENDING:
+            self._enter(GameState.IDLE)
+        elif self.state == GameState.IDLE:
             self._session_animals = random.sample(config.ANIMALS, config.ANIMALS_PER_SESSION)
             self._animal_index = 0
             if self._round == 0:
@@ -119,7 +122,10 @@ class JuiceGame:
                 if self._animal_index < len(self._session_animals):
                     self._enter(GameState.ANIMAL)
                 else:
-                    self._enter(GameState.IDLE)
+                    self._enter(GameState.ENDING)
+
+        elif self.state == GameState.ENDING:
+            pass  # wait for SPACE key via start()
 
     # ------------------------------------------------------------------ #
 
@@ -188,4 +194,5 @@ class JuiceGame:
             "area_counts": self._last_area_counts[:],
             "elapsed": time.monotonic() - self._state_entered_at,
             "taste_comment": self.taste_comment,
+            "is_last_turn": self._animal_index == len(self._session_animals) - 1,
         }

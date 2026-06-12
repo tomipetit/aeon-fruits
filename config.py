@@ -19,13 +19,14 @@ MOG2_VAR_THRESHOLD = 25
 # Minimum foreground blob area in pixels (at detection scale)
 MIN_PERSON_BLOB_AREA = 2000
 
-# YOLOv8 face detection model and confidence threshold
-YOLO_MODEL = "yolov8n-face.pt"
+# YOLOv8 models and confidence threshold
+YOLO_MODEL_PERSON = "yolov8n.pt"        # person detection (jump counting, MIX phase)
+YOLO_MODEL_FACE   = "yolov8n-face.pt"   # face detection (area counting, FRUIT_SELECT)
 YOLO_CONF_THRESHOLD = 0.4
 
 # Jump detection
-JUMP_Y_THRESHOLD = 0.04   # normalized Y displacement (fraction of frame height)
-JUMP_DEBOUNCE_SEC = 0.5   # seconds between jump counts per blob
+JUMP_Y_THRESHOLD = 0.015  # normalized Y displacement (fraction of frame height)
+JUMP_DEBOUNCE_SEC = 0.3   # seconds between jump counts per blob
 
 # Spin detection (optical flow)
 SPIN_FLOW_THRESHOLD = 3.0   # mean absolute horizontal flow to trigger spin
@@ -34,14 +35,15 @@ SPIN_DURATION_SEC = 2.0     # how long flow must exceed threshold
 # Game phase durations (seconds)
 PHASE_DURATIONS = {
     "IDLE": -1,             # wait for operator keypress
-    "INTRO1": 5,
-    "INTRO2": 8,
+    "INTRO1": 7,
+    "INTRO2": 10,
     "INTRO3": 5,
     "ANIMAL": 4,
     "FRUIT_SELECT": 15,     # stand in areas, fruits fall proportionally
     "MIX": 15,              # everyone jumps to mix
     "POUR": 5,              # glass reveal before result
     "RESULT": 12,
+    "ENDING": -1,            # wait for operator keypress (SPACE → IDLE)
 }
 
 # Total jumps (all areas combined) to reach mix_level=1.0

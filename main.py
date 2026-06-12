@@ -33,7 +33,7 @@ if os.path.exists(_env_path):
 
 import config
 from detector import MotionDetector
-from game_state import JuiceGame
+from game_state import GameState, JuiceGame
 from renderer import ARRenderer
 
 
@@ -88,6 +88,7 @@ def main():
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     if config.DISPLAY_MONITOR_OFFSET_X:
         cv2.moveWindow(win, config.DISPLAY_MONITOR_OFFSET_X, 0)
+        cv2.setWindowProperty(win, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     # ----- Subsystems -----
     detector = MotionDetector()
@@ -122,7 +123,8 @@ def main():
         bgr = cv2.flip(bgr, 1)
 
         # -- Detection --
-        detector.update(bgr)
+        use_face = game.state == GameState.FRUIT_SELECT
+        detector.update(bgr, use_face_model=use_face)
         area_counts = detector.get_area_counts()
         jump_counts = detector.get_jump_counts()
         spinning = detector.is_spinning()
@@ -138,15 +140,16 @@ def main():
         else:
             display = renderer.render(bgr, render_data)
 
-        # -- FPS overlay --
+        # -- FPS overlay (demo/debug mode only) --
         frame_count += 1
         now = time.monotonic()
         if now - prev_time >= 1.0:
             fps = frame_count / (now - prev_time)
             frame_count = 0
             prev_time = now
-            cv2.putText(display, f"FPS: {fps:.1f}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if args.demo or args.no_camera or debug_on:
+                cv2.putText(display, f"FPS: {fps:.1f}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
         cv2.imshow(win, display)
 
@@ -156,7 +159,10 @@ def main():
             break
         elif key == ord(" "):
             game.start()
-            print("ゲーム開始!")
+            if game.state == GameState.IDLE:
+                print("TOPに戻りました。")
+            else:
+                print("ゲーム開始!")
         elif key == ord("d"):
             debug_on = not debug_on
             print(f"デバッグ表示: {'ON' if debug_on else 'OFF'}")
