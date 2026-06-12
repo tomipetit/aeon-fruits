@@ -169,6 +169,15 @@ class MotionDetector:
         self._jump_counts = [0] * config.NUM_AREAS
         return counts
 
+    def get_face_positions(self) -> list[tuple[int, int]]:
+        """Returns active face centroid positions in full-resolution coordinates."""
+        inv = 1.0 / self._scale
+        return [
+            (int(blob.cx * inv), int(blob.cy * inv))
+            for blob in self._blobs
+            if self._frame_number - blob.last_seen_frame <= 2
+        ]
+
     def is_spinning(self) -> bool:
         return self._spin_consec_frames >= self._spin_frames_needed
 
