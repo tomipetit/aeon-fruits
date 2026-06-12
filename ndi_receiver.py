@@ -1,3 +1,5 @@
+import multiprocessing
+
 import numpy as np
 import cv2
 
@@ -6,6 +8,24 @@ from cyndilib.receiver import Receiver
 from cyndilib.framesync import FrameSync
 from cyndilib.video_frame import VideoFrameSync
 from cyndilib.wrapper.ndi_recv import RecvColorFormat, RecvBandwidth
+
+
+def _find_ndi_sources_worker(result_queue: multiprocessing.Queue, wait_ms: int) -> None:
+    """Subprocess worker: discover NDI sources and put names in result_queue.
+
+    Runs in a separate process to avoid GIL deadlock caused by cyndilib's
+    wait_for_sources blocking indefinitely in its C extension.
+    """
+    try:
+        from cyndilib.finder import Finder
+        f = Finder()
+        f.open()
+        f.wait_for_sources(wait_ms)
+        names = list(f.get_source_names())
+        f.close()
+        result_queue.put(names)
+    except Exception:
+        result_queue.put([])
 
 
 class NDIReceiver:
@@ -19,11 +39,29 @@ class NDIReceiver:
         self._video_frame = VideoFrameSync()
         self._frame_sync.set_video_frame(self._video_frame)
         self._connected = False
+        self._finder_opened = False
 
     def list_sources(self, wait_ms: int = 5000) -> list[str]:
-        self._finder.open()
-        self._finder.wait_for_sources(wait_ms)
-        return list(self._finder.get_source_names())
+        # Also open main finder so it can discover sources concurrently
+        if not self._finder_opened:
+            self._finder.open()
+            self._finder_opened = True
+
+        # Use a subprocess so the process-level join respects the timeout
+        # (threading won't work because wait_for_sources holds the GIL)
+        ctx = multiprocessing.get_context("spawn")
+        q: multiprocessing.Queue = ctx.Queue()
+        p = ctx.Process(target=_find_ndi_sources_worker, args=(q, wait_ms), daemon=True)
+        p.start()
+        p.join(timeout=wait_ms / 1000 + 2.0)
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=1.0)
+            return []
+        try:
+            return q.get_nowait()
+        except Exception:
+            return []
 
     def connect(self, source_name: str):
         source = self._finder.get_source(source_name)
@@ -72,4 +110,5 @@ class NDIReceiver:
     def close(self):
         if self._connected:
             self._receiver.disconnect()
-        self._finder.close()
+        if self._finder_opened:
+            self._finder.close()

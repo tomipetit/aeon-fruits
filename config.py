@@ -7,7 +7,7 @@ NUM_AREAS = 3
 NDI_SOURCE_INDEX = None
 
 # HDMI second monitor: set X offset if projector is a second monitor (e.g. 1920 for right-of-primary)
-DISPLAY_MONITOR_OFFSET_X = 0
+DISPLAY_MONITOR_OFFSET_X = 1920
 
 # Detection processing scale (0.5 = half resolution for MOG2, faster but less precise)
 DETECTION_SCALE = 0.5

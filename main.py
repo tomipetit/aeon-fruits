@@ -78,6 +78,7 @@ def main():
         print("デモモード: Webカメラ使用")
         receiver = None
     else:
+        print("NDIソースを検索中... (最大7秒)")
         from ndi_receiver import NDIReceiver
         receiver = NDIReceiver()
         if config.NDI_SOURCE_INDEX is not None:
