@@ -423,10 +423,12 @@ def _draw_mixer(frame: np.ndarray, data: dict):
     cv2.circle(frame, (cx, cy), r, (80, 80, 80), -1)
     cv2.circle(frame, (cx, cy), r, (255, 255, 255), 6)
 
-    # Juice circle expanding from center
+    # Juice circle expanding from center (semi-transparent)
     juice_r = max(0, int(r * mix_level))
     if juice_r > 0:
-        cv2.circle(frame, (cx, cy), juice_r, juice_color, -1)
+        overlay = frame.copy()
+        cv2.circle(overlay, (cx, cy), juice_r, juice_color, -1)
+        cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
 
     pct = int(mix_level * 100)
     cv2.putText(frame, f"{pct}%", (cx - 50, cy + 12),
