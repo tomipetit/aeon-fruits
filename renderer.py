@@ -359,12 +359,13 @@ def _draw_area_counts(frame: np.ndarray, data: dict):
 
 def _draw_fruit_labels(frame: np.ndarray, data: dict) -> list:
     area_w = config.WIDTH // config.NUM_AREAS
-    lw, lh, radius = 300, 72, 22
+    lh, radius = 72, 22
     ly = config.HEIGHT - 100
     ja_texts = []
     for i, fruit in enumerate(data["area_fruits"]):
-        cx = i * area_w + area_w // 2
-        x1, x2 = cx - lw // 2, cx + lw // 2
+        x1 = i * area_w + 78          # same as bottle
+        x2 = (i + 1) * area_w - 78    # same as bottle
+        cx = (x1 + x2) // 2
         color = fruit["bgr"]
         _draw_rounded_rect(frame, (x1, ly), (x2, ly + lh), color,  radius=radius, thickness=-1)
         _draw_rounded_rect(frame, (x1, ly), (x2, ly + lh), (255, 255, 255), radius=radius, thickness=3)

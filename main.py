@@ -59,7 +59,11 @@ def main():
     parser.add_argument("--demo", action="store_true", help="use webcam instead of NDI")
     parser.add_argument("--no-camera", action="store_true", help="camera-less demo: z/x/c keys adjust area proportions")
     parser.add_argument("--debug", action="store_true", help="show detection overlay")
+    parser.add_argument("--animals", type=int, default=config.ANIMALS_PER_SESSION,
+                        help=f"number of animals per session (default: {config.ANIMALS_PER_SESSION})")
     args = parser.parse_args()
+
+    config.ANIMALS_PER_SESSION = max(1, min(args.animals, len(config.ANIMALS)))
 
     # ----- Input source -----
     if args.no_camera:
